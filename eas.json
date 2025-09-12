@@ -1,0 +1,16 @@
+{
+  "cli": {
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br"
+      }
+    },
+    "production": {
+      "android": { "buildType": "app-bundle" }
+    }
+  }
+}
