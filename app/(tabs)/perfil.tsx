@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 const API_BASE = "https://app.voucarregar.com.br";
 
@@ -48,7 +49,8 @@ const VAZIO: CaminhoneiroDados = {
 };
 
 function maskCPF(v = "") {
-  return v.replace(/\D/g, "")
+  return v
+    .replace(/\D/g, "")
     .replace(/(\d{3})(\d)/, "$1.$2")
     .replace(/(\d{3})(\d)/, "$1.$2")
     .replace(/(\d{3})(\d{1,2}).*/, "$1-$2");
@@ -56,13 +58,13 @@ function maskCPF(v = "") {
 
 function maskPhone(v = "") {
   const d = v.replace(/\D/g, "");
-  if (d.length <= 10)
-    return d.replace(/(\d{2})(\d{4})(\d{0,4}).*/, "($1) $2-$3").trim();
+  if (d.length <= 10) return d.replace(/(\d{2})(\d{4})(\d{0,4}).*/, "($1) $2-$3").trim();
   return d.replace(/(\d{2})(\d{5})(\d{0,4}).*/, "($1) $2-$3").trim();
 }
 
 export default function Perfil() {
   const router = useRouter();
+  const insets = useSafeAreaInsets(); // 👈 safe area
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -74,7 +76,6 @@ export default function Perfil() {
     setLoading(true);
 
     try {
-      // token e (opcional) id salvos no login
       const [token, userId] = await Promise.all([
         Platform.OS === "web" ? null : SecureStore.getItemAsync("authToken"),
         Platform.OS === "web" ? null : SecureStore.getItemAsync("userId"),
@@ -85,7 +86,6 @@ export default function Perfil() {
         return;
       }
 
-      // Tenta endpoints em ordem: /caminhoneiro/me -> /mobile/me -> /caminhoneiro/:id
       const tryFetch = async (url: string) => {
         const res = await fetch(url, {
           headers: {
@@ -98,10 +98,7 @@ export default function Perfil() {
       };
 
       let perfil: Partial<CaminhoneiroDados> | null = null;
-      const urls: string[] = [
-        `${API_BASE}/api/caminhoneiro/me`,
-        `${API_BASE}/api/mobile/me`,
-      ];
+      const urls: string[] = [`${API_BASE}/api/caminhoneiro/me`, `${API_BASE}/api/mobile/me`];
       if (userId) urls.push(`${API_BASE}/api/caminhoneiro/${userId}`);
 
       for (const u of urls) {
@@ -109,20 +106,17 @@ export default function Perfil() {
           perfil = await tryFetch(u);
           break;
         } catch {
-          // tenta a próxima url
+          // tenta próxima
         }
       }
 
       if (!perfil) throw new Error("Não foi possível obter os dados do perfil.");
 
-      // Normaliza com defaults
-      const norm: CaminhoneiroDados = {
+      setDados({
         ...VAZIO,
         ...perfil,
         aceitaWhatsapp: Boolean(perfil.aceitaWhatsapp),
-      };
-
-      setDados(norm);
+      });
     } catch (e: any) {
       console.error("Perfil:", e?.message || e);
       setErro("Não foi possível carregar seus dados agora.");
@@ -164,48 +158,51 @@ export default function Perfil() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
+      <SafeAreaView style={[styles.center, { paddingTop: (insets.top ?? 0) + 8 }]} edges={["top", "left", "right"]}>
         <ActivityIndicator size="large" />
         <Text style={{ marginTop: 8 }}>Carregando seu perfil…</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView
-      style={styles.page}
-      contentContainerStyle={{ padding: 16 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    >
-      <Text style={styles.title}>👤 Meu Perfil</Text>
+    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+      <ScrollView
+        style={styles.page}
+        contentContainerStyle={{ padding: 16, paddingTop: (insets.top ?? 0) + 8 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentInsetAdjustmentBehavior="automatic"
+      >
+        <Text style={styles.title}>👤 Meu Perfil</Text>
 
-      {!!erro && (
-        <View style={styles.alert}>
-          <Text style={styles.alertText}>{erro}</Text>
+        {!!erro && (
+          <View style={styles.alert}>
+            <Text style={styles.alertText}>{erro}</Text>
+          </View>
+        )}
+
+        <View style={styles.card}>
+          <Linha rotulo="Nome" valor={dados.nome || "—"} forte />
+          <Linha rotulo="E-mail" valor={dados.email || "—"} />
+          <Linha rotulo="CPF" valor={dados.cpf ? maskCPF(dados.cpf) : "—"} />
+          <Linha rotulo="Telefone" valor={dados.telefone ? maskPhone(dados.telefone) : "—"} />
+          <Linha rotulo="Endereço" valor={formatEndereco(dados)} />
+          <Linha rotulo="CEP" valor={dados.cep || "—"} />
+          <Linha rotulo="Aceita WhatsApp" valor={dados.aceitaWhatsapp ? "Sim" : "Não"} />
+          <Linha rotulo="Status" valor={dados.status || "—"} />
+
+          <View style={{ marginTop: 12, gap: 8 }}>
+            <TouchableOpacity style={styles.btnDoc} onPress={abrirCNH} activeOpacity={0.9}>
+              <Text style={styles.btnDocText}>📄 Visualizar CNH</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.btnSair} onPress={sair} activeOpacity={0.9}>
+              <Text style={styles.btnSairText}>Sair</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      )}
-
-      <View style={styles.card}>
-        <Linha rotulo="Nome" valor={dados.nome || "—"} forte />
-        <Linha rotulo="E-mail" valor={dados.email || "—"} />
-        <Linha rotulo="CPF" valor={dados.cpf ? maskCPF(dados.cpf) : "—"} />
-        <Linha rotulo="Telefone" valor={dados.telefone ? maskPhone(dados.telefone) : "—"} />
-        <Linha rotulo="Endereço" valor={formatEndereco(dados)} />
-        <Linha rotulo="CEP" valor={dados.cep || "—"} />
-        <Linha rotulo="Aceita WhatsApp" valor={dados.aceitaWhatsapp ? "Sim" : "Não"} />
-        <Linha rotulo="Status" valor={dados.status || "—"} />
-
-        <View style={{ marginTop: 12, gap: 8 }}>
-          <TouchableOpacity style={styles.btnDoc} onPress={abrirCNH} activeOpacity={0.9}>
-            <Text style={styles.btnDocText}>📄 Visualizar CNH</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.btnSair} onPress={sair} activeOpacity={0.9}>
-            <Text style={styles.btnSairText}>Sair</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -226,8 +223,9 @@ function formatEndereco(d: CaminhoneiroDados) {
 }
 
 const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: "#f9fafb" },
   page: { flex: 1, backgroundColor: "#f9fafb" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f9fafb" },
 
   title: { fontSize: 20, fontWeight: "800", color: "#111827", marginBottom: 12 },
 

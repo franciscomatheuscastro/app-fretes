@@ -1,17 +1,60 @@
 name: Upload iOS to TestFlight
 on: { workflow_dispatch: {} }
+
 jobs:
   upload:
     runs-on: macos-latest
+
     steps:
+      # 1) Baixa o .ipa do Expo (use o URL do seu build atual)
       - name: Download IPA from Expo
         run: |
+          set -e
           IPA_URL="https://expo.dev/artifacts/eas/4JMKCpy7AuGp94JUD3uGHq.ipa"
+          echo "Baixando: $IPA_URL"
           curl -fL "$IPA_URL" -o app.ipa
-      - name: Upload to TestFlight (ASC API Key)
-        uses: apple-actions/upload-testflight@v1
+          ls -lh app.ipa
+
+      # (opcional) sobe o IPA como artifact p/ debug
+      - name: Upload IPA as artifact (debug)
+        uses: actions/upload-artifact@v4
         with:
-          app-path: app.ipa
-          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
-          api-key-id: ${{ secrets.APPSTORE_KEY_ID }}
-          api-key: ${{ secrets.APPSTORE_API_KEY }}
+          name: ipa-baixado
+          path: app.ipa
+
+      # 2) Prepara Ruby/Fastlane
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: Install fastlane
+        run: gem install fastlane -NV
+
+      # 3) Gera o JSON de API Key (com os seus Secrets)
+      - name: Write App Store Connect API key JSON
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_API_KEY: ${{ secrets.APPSTORE_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os, json
+          data = {
+            "key_id": os.environ["APPSTORE_KEY_ID"],
+            "issuer_id": os.environ["APPSTORE_ISSUER_ID"],
+            "key": os.environ["APPSTORE_API_KEY"],
+          }
+          open("asc_key.json","w").write(json.dumps(data))
+          print("asc_key.json escrito.")
+          PY
+          cat asc_key.json | wc -c
+
+      # 4) Faz o upload pro TestFlight
+      - name: Upload to TestFlight (fastlane pilot)
+        run: |
+          fastlane pilot upload \
+            --ipa app.ipa \
+            --api_key_path asc_key.json \
+            --skip_waiting_for_build_processing true \
+            --verbose

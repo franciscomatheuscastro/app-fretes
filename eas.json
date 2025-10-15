@@ -1,16 +1,21 @@
 {
-  "cli": {
-    "appVersionSource": "remote"
-  },
   "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "dev",
+      "env": { "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br" },
+      "android": { "buildType": "apk" }
+    },
     "preview": {
-      "android": { "buildType": "apk" },
-      "env": {
-        "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br"
-      }
+      "channel": "preview",
+      "env": { "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br" },
+      "android": { "buildType": "apk" }
     },
     "production": {
-      "android": { "buildType": "app-bundle" }
+      "channel": "production",
+      "android": { "buildType": "app-bundle" },
+      "env": { "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br" }
     }
   }
 }

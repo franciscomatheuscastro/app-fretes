@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "617048333127",
+    "project_id": "vou-carregar",
+    "storage_bucket": "vou-carregar.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:617048333127:android:3264539fac9c8673c24a62",
+        "android_client_info": {
+          "package_name": "br.voucarregar.motoristafretes"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDZaybBLhbb2bTQIiBEhThqtZXwF6K1M5M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

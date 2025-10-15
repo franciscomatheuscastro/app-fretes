@@ -13,12 +13,14 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import * as Storage from "../backend/lib/storage"; // se o caminho for diferente, ajuste
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Storage from "../../backend/lib/storage";
 
 const API_BASE = "https://app.voucarregar.com.br";
+const CIDADES_ENDPOINT = `${API_BASE}/api/cidades`;
 
 type Frete = {
-  id: string;
+  id: string | number;
   cidadeColeta: string;
   cidadeEntrega: string;
   produto: string;
@@ -30,8 +32,58 @@ type Frete = {
   unidadePeso?: "kg" | "toneladas";
 };
 
+type CidadeResp = { nome: string; uf: string };
+
+function normalize(v: string) {
+  return v
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+async function canonicalizarCidade(input: string): Promise<string> {
+  const raw = input.trim();
+  if (!raw) return raw;
+
+  try {
+    const resp = await fetch(`${CIDADES_ENDPOINT}?search=${encodeURIComponent(raw)}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!resp.ok) return raw;
+
+    const arr = (await resp.json()) as CidadeResp[];
+    if (!Array.isArray(arr) || arr.length === 0) return raw;
+
+    const target = normalize(raw);
+    const toLabel = (c: CidadeResp) => `${c.nome} - ${c.uf}`;
+
+    let found = arr.find((c) => normalize(toLabel(c)) === target);
+    if (found) return found.nome;
+
+    found = arr.find((c) => normalize(c.nome) === target);
+    if (found) return found.nome;
+
+    found = arr.find(
+      (c) => normalize(toLabel(c)).startsWith(target) || normalize(c.nome).startsWith(target)
+    );
+    if (found) return found.nome;
+
+    found = arr.find(
+      (c) => normalize(toLabel(c)).includes(target) || normalize(c.nome).includes(target)
+    );
+    if (found) return found.nome;
+
+    return arr[0].nome;
+  } catch {
+    return raw;
+  }
+}
+
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets(); // 👈 safe area
 
   const [cidadeOrigem, setCidadeOrigem] = useState("");
   const [cidadeDestino, setCidadeDestino] = useState("");
@@ -43,10 +95,10 @@ export default function HomeScreen() {
     setMensagem("");
     setFretes([]);
 
-    const origem = cidadeOrigem.trim();
-    const destino = cidadeDestino.trim();
+    const origemRaw = cidadeOrigem.trim();
+    const destinoRaw = cidadeDestino.trim();
 
-    if (!origem) {
+    if (!origemRaw) {
       setMensagem("Informe a cidade de origem.");
       return;
     }
@@ -55,14 +107,16 @@ export default function HomeScreen() {
       setLoading(true);
       Keyboard.dismiss();
 
-      const qs = new URLSearchParams({ origem });
-      if (destino) qs.append("destino", destino);
+      const origemCanon = await canonicalizarCidade(origemRaw);
+      const destinoCanon = destinoRaw ? await canonicalizarCidade(destinoRaw) : "";
 
       const token = await Storage.getItem("authToken");
-      const headers: Record<string, string> = {
-        Accept: "application/json",
-      };
+      const headers: Record<string, string> = { Accept: "application/json" };
       if (token) headers.Authorization = `Bearer ${token}`;
+
+      const qs = new URLSearchParams();
+      qs.set("origem", origemCanon);
+      if (destinoCanon) qs.set("destino", destinoCanon);
 
       const res = await fetch(`${API_BASE}/api/fretes/buscar?${qs.toString()}`, {
         method: "GET",
@@ -82,7 +136,7 @@ export default function HomeScreen() {
 
       setFretes(data);
       setMensagem(data.length ? "" : "Nenhum frete encontrado.");
-    } catch (e: any) {
+    } catch (e) {
       console.warn(e);
       setMensagem("Erro ao buscar fretes. Verifique sua conexão e tente novamente.");
     } finally {
@@ -113,8 +167,8 @@ export default function HomeScreen() {
             {item.cidadeColeta} → {item.cidadeEntrega}
           </Text>
           <Text style={styles.cardSub} numberOfLines={2}>
-            {item.tipoCarga} • {item.pesoTotal}{" "}
-            {item.unidadePeso === "toneladas" ? "ton" : "kg"} • {item.produto}
+            {item.tipoCarga} • {item.pesoTotal} {item.unidadePeso === "toneladas" ? "ton" : "kg"} •{" "}
+            {item.produto}
           </Text>
         </View>
 
@@ -127,7 +181,7 @@ export default function HomeScreen() {
           <TouchableOpacity
             style={styles.btn}
             activeOpacity={0.85}
-            onPress={() => router.push(`/frete/${encodeURIComponent(String(item.id))}`)}
+            onPress={() => router.push(`/fretes/${encodeURIComponent(String(item.id))}`)}
           >
             <Text style={styles.btnText}>Ver Frete</Text>
           </TouchableOpacity>
@@ -137,96 +191,99 @@ export default function HomeScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
+    <SafeAreaView
       style={{ flex: 1, backgroundColor: "#f9fafb" }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      edges={["top", "left", "right"]} // 👈 garante respiro no topo
     >
-      <View style={styles.page}>
-        <Text style={styles.title}>
-          🔍 Buscar <Text style={{ color: "#ea580c" }}>Fretes</Text>
-        </Text>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View style={[styles.page, { paddingTop: (insets.top ?? 0) + 8 }]}>
+          <Text style={styles.title}>
+            🔍 Buscar <Text style={{ color: "#ea580c" }}>Fretes</Text>
+          </Text>
 
-        {/* Filtros simples */}
-        <View style={styles.filters}>
-          <View style={styles.inputCol}>
-            <Text style={styles.label}>Origem *</Text>
-            <TextInput
-              placeholder="Ex: São Paulo"
-              value={cidadeOrigem}
-              onChangeText={setCidadeOrigem}
-              autoCapitalize="words"
-              autoCorrect={false}
-              style={styles.input}
-              placeholderTextColor="#9ca3af"
-              returnKeyType="next"
+          {/* Filtros simples */}
+          <View style={styles.filters}>
+            <View style={styles.inputCol}>
+              <Text style={styles.label}>Origem *</Text>
+              <TextInput
+                placeholder="Ex: Sao Paulo"
+                value={cidadeOrigem}
+                onChangeText={setCidadeOrigem}
+                autoCapitalize="words"
+                autoCorrect={false}
+                style={styles.input}
+                placeholderTextColor="#9ca3af"
+                returnKeyType="next"
+              />
+            </View>
+
+            <View style={styles.inputCol}>
+              <Text style={styles.label}>Destino (opcional)</Text>
+              <TextInput
+                placeholder="Ex: Belo Horizonte"
+                value={cidadeDestino}
+                onChangeText={setCidadeDestino}
+                autoCapitalize="words"
+                autoCorrect={false}
+                style={styles.input}
+                placeholderTextColor="#9ca3af"
+                returnKeyType="search"
+                onSubmitEditing={buscarFretes}
+              />
+            </View>
+
+            <View style={styles.row}>
+              <TouchableOpacity
+                onPress={buscarFretes}
+                style={[styles.actionBtn, { backgroundColor: "#16a34a" }]}
+                activeOpacity={0.85}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.actionBtnText}>Buscar</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={limpar}
+                style={[styles.actionBtn, { backgroundColor: "#e5e7eb" }]}
+                activeOpacity={0.85}
+                disabled={loading}
+              >
+                <Text style={[styles.actionBtnText, { color: "#111827" }]}>Limpar</Text>
+              </TouchableOpacity>
+            </View>
+
+            {!!mensagem && <Text style={styles.feedback}>{mensagem}</Text>}
+          </View>
+
+          {/* Lista */}
+          {fretes.length === 0 && !loading ? (
+            <View style={styles.empty}>
+              <Text style={{ color: "#6b7280" }}>Use os campos acima para procurar fretes.</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={fretes}
+              keyExtractor={(item) => String(item.id)}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 16 }}
+              renderItem={renderItem}
             />
-          </View>
-
-          <View style={styles.inputCol}>
-            <Text style={styles.label}>Destino (opcional)</Text>
-            <TextInput
-              placeholder="Ex: Belo Horizonte"
-              value={cidadeDestino}
-              onChangeText={setCidadeDestino}
-              autoCapitalize="words"
-              autoCorrect={false}
-              style={styles.input}
-              placeholderTextColor="#9ca3af"
-              returnKeyType="search"
-              onSubmitEditing={buscarFretes}
-            />
-          </View>
-
-          <View style={styles.row}>
-            <TouchableOpacity
-              onPress={buscarFretes}
-              style={[styles.actionBtn, { backgroundColor: "#16a34a" }]}
-              activeOpacity={0.85}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.actionBtnText}>Buscar</Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={limpar}
-              style={[styles.actionBtn, { backgroundColor: "#e5e7eb" }]}
-              activeOpacity={0.85}
-              disabled={loading}
-            >
-              <Text style={[styles.actionBtnText, { color: "#111827" }]}>Limpar</Text>
-            </TouchableOpacity>
-          </View>
-
-          {!!mensagem && <Text style={styles.feedback}>{mensagem}</Text>}
+          )}
         </View>
-
-        {/* Lista */}
-        {fretes.length === 0 && !loading ? (
-          <View style={styles.empty}>
-            <Text style={{ color: "#6b7280" }}>
-              Use os campos acima para procurar fretes.
-            </Text>
-          </View>
-        ) : (
-          <FlatList
-            data={fretes}
-            keyExtractor={(item) => String(item.id)}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 16 }}
-            renderItem={renderItem}
-          />
-        )}
-      </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, padding: 14, gap: 10 },
+  page: { flex: 1, padding: 14, gap: 10, paddingTop: 8 /* será somado ao insets.top */ },
   title: {
     fontSize: 22,
     fontWeight: "800",
@@ -234,8 +291,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 6,
   },
-
-  // filtros
   filters: {
     backgroundColor: "#fff",
     borderRadius: 12,
@@ -257,17 +312,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   row: { flexDirection: "row", gap: 8 },
-  actionBtn: {
-    flex: 1,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
+  actionBtn: { flex: 1, borderRadius: 10, paddingVertical: 12, alignItems: "center" },
   actionBtnText: { color: "#fff", fontWeight: "800" },
-
   feedback: { color: "#dc2626", textAlign: "center", marginTop: 2 },
-
-  // lista
   empty: {
     flex: 1,
     minHeight: 120,

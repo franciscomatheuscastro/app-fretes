@@ -2,19 +2,22 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Linking from "expo-linking";
 import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 // 🔧 Ajuste estes dados para os seus canais reais
 const SUPPORT = {
-  whatsappE164: "5599999999999", // DDI + DDD + número, só dígitos (ex.: 55 65 99999 9999 -> "5565999999999")
+  whatsappE164: "5551989133934", // DDI 55 + DDD 51 + número
   whatsappMsg: "Olá! Preciso de ajuda no app Vou Carregar.",
   email: "suporte@voucarregar.com.br",
-  phoneE164: "5565999999999",
-  phoneDisplay: "(65) 9 9999-9999",
+  phoneE164: "5551989133934",
+  phoneDisplay: "(51) 9 8913-3934",
   helpCenterUrl: "https://app.voucarregar.com.br/ajuda", // opcional
   horario: "Seg–Sex, 08:00 às 18:00 (BRT)",
 };
 
 export default function Ajuda() {
+  const insets = useSafeAreaInsets();
+
   async function openUrl(url: string) {
     try {
       const can = await Linking.canOpenURL(url);
@@ -35,12 +38,7 @@ export default function Ajuda() {
   function openEmail() {
     const subject = encodeURIComponent("Suporte • App Vou Carregar");
     const body = encodeURIComponent(
-      [
-        "Descreva seu problema aqui.",
-        "",
-        "—",
-        `Sistema: ${Platform.OS}`,
-      ].join("\n")
+      ["Descreva seu problema aqui.", "", "—", `Sistema: ${Platform.OS}`].join("\n")
     );
     const url = `mailto:${SUPPORT.email}?subject=${subject}&body=${body}`;
     openUrl(url);
@@ -51,85 +49,66 @@ export default function Ajuda() {
     openUrl(url);
   }
 
-  function openHelpCenter() {
-    if (!SUPPORT.helpCenterUrl) {
-      Alert.alert("Central de ajuda", "Em breve!");
-      return;
-    }
-    openUrl(SUPPORT.helpCenterUrl);
-  }
-
   return (
-    <View style={styles.page}>
-      <Text style={styles.title}>🛟 Ajuda & Suporte</Text>
-      <Text style={styles.subtitle}>
-        Fale com a equipe Vou Carregar pelos canais abaixo.
-      </Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#f9fafb" }} edges={["top", "left", "right"]}>
+      <View style={[styles.page, { paddingTop: (insets.top ?? 0) + 8 }]}>
+        <Text style={styles.title}>🛟 Ajuda & Suporte</Text>
+        <Text style={styles.subtitle}>Fale com a equipe Vou Carregar pelos canais abaixo.</Text>
 
-      <View style={styles.card}>
-        <View style={styles.row}>
-          <Ionicons name="logo-whatsapp" size={22} color="#16a34a" />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.itemTitle}>WhatsApp</Text>
-            <Text style={styles.itemDesc}>Atendimento rápido pelo WhatsApp.</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <Ionicons name="logo-whatsapp" size={22} color="#16a34a" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.itemTitle}>WhatsApp</Text>
+              <Text style={styles.itemDesc}>Atendimento rápido pelo WhatsApp.</Text>
+            </View>
+            <TouchableOpacity style={[styles.btn, styles.btnWhats]} onPress={openWhatsApp}>
+              <Text style={styles.btnText}>Abrir</Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={[styles.btn, styles.btnWhats]} onPress={openWhatsApp}>
-            <Text style={styles.btnText}>Abrir</Text>
-          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          <View style={styles.row}>
+            <Ionicons name="mail-outline" size={22} color="#2563eb" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.itemTitle}>E-mail</Text>
+              <Text style={styles.itemDesc}>{SUPPORT.email}</Text>
+            </View>
+            <TouchableOpacity style={[styles.btn, styles.btnEmail]} onPress={openEmail}>
+              <Text style={styles.btnText}>Enviar</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.row}>
+            <Ionicons name="call-outline" size={22} color="#ea580c" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.itemTitle}>Telefone</Text>
+              <Text style={styles.itemDesc}>{SUPPORT.phoneDisplay}</Text>
+            </View>
+            <TouchableOpacity style={[styles.btn, styles.btnPhone]} onPress={callPhone}>
+              <Text style={styles.btnText}>Ligar</Text>
+            </TouchableOpacity>
+          </View>
+
+          
         </View>
 
-        <View style={styles.divider} />
-
-        <View style={styles.row}>
-          <Ionicons name="mail-outline" size={22} color="#2563eb" />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.itemTitle}>E-mail</Text>
-            <Text style={styles.itemDesc}>{SUPPORT.email}</Text>
-          </View>
-          <TouchableOpacity style={[styles.btn, styles.btnEmail]} onPress={openEmail}>
-            <Text style={styles.btnText}>Enviar</Text>
-          </TouchableOpacity>
+        <View style={styles.note}>
+          <Ionicons name="time-outline" size={18} color="#6b7280" />
+          <Text style={styles.noteText}>Horário de atendimento: {SUPPORT.horario}</Text>
         </View>
 
-        <View style={styles.divider} />
-
-        <View style={styles.row}>
-          <Ionicons name="call-outline" size={22} color="#ea580c" />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.itemTitle}>Telefone</Text>
-            <Text style={styles.itemDesc}>{SUPPORT.phoneDisplay}</Text>
-          </View>
-          <TouchableOpacity style={[styles.btn, styles.btnPhone]} onPress={callPhone}>
-            <Text style={styles.btnText}>Ligar</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.row}>
-          <Ionicons name="help-circle-outline" size={22} color="#111827" />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.itemTitle}>Central de Ajuda</Text>
-            <Text style={styles.itemDesc}>FAQ e tutoriais.</Text>
-          </View>
-          <TouchableOpacity style={[styles.btn, styles.btnHelp]} onPress={openHelpCenter}>
-            <Text style={styles.btnText}>Abrir</Text>
-          </TouchableOpacity>
+        <View style={styles.tips}>
+          <Text style={styles.tipsTitle}>Dicas para agilizar o atendimento</Text>
+          <Text style={styles.tip}>• Envie prints da tela com o erro.</Text>
+          <Text style={styles.tip}>• Informe seu CPF cadastrado e modelo do aparelho.</Text>
+          <Text style={styles.tip}>• Descreva o passo a passo até o problema ocorrer.</Text>
         </View>
       </View>
-
-      <View style={styles.note}>
-        <Ionicons name="time-outline" size={18} color="#6b7280" />
-        <Text style={styles.noteText}>Horário de atendimento: {SUPPORT.horario}</Text>
-      </View>
-
-      <View style={styles.tips}>
-        <Text style={styles.tipsTitle}>Dicas para agilizar o atendimento</Text>
-        <Text style={styles.tip}>• Envie prints da tela com o erro.</Text>
-        <Text style={styles.tip}>• Informe seu CPF cadastrado e modelo do aparelho.</Text>
-        <Text style={styles.tip}>• Descreva o passo a passo até o problema ocorrer.</Text>
-      </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

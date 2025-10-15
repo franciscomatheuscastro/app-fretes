@@ -1,7 +1,7 @@
 import * as LocalAuthentication from "expo-local-authentication";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Platform } from "react-native";
-import * as Storage from "../app/backend/lib/storage"; // <- caminho CORRETO
+import * as Storage from "../backend/lib/storage"; // <- caminho CORRETO
 
 const BIO_KEY = "bioEnabled";
 
