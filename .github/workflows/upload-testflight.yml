@@ -1,0 +1,17 @@
+name: Upload iOS to TestFlight
+on: { workflow_dispatch: {} }
+jobs:
+  upload:
+    runs-on: macos-latest
+    steps:
+      - name: Download IPA from Expo
+        run: |
+          IPA_URL="https://expo.dev/artifacts/eas/4JMKCpy7AuGp94JUD3uGHq.ipa"
+          curl -fL "$IPA_URL" -o app.ipa
+      - name: Upload to TestFlight (ASC API Key)
+        uses: apple-actions/upload-testflight@v1
+        with:
+          app-path: app.ipa
+          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          api-key: ${{ secrets.APPSTORE_API_KEY }}
