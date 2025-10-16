@@ -4,13 +4,17 @@ import { useRouter, type Href } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert, AppState, KeyboardAvoidingView, Platform, StyleSheet,
+  Alert,
+  AppState,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
-import 'react-native-get-random-values';
+import "react-native-get-random-values";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { v4 as uuidv4 } from "uuid";
 import { registerPushTokenOnBackend } from "../backend/lib/push";
@@ -58,6 +62,9 @@ export default function CaminhoneiroLogin() {
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [mostrarSenha, setMostrarSenha] = useState(false);
+
+  // estados de boot / carregamento
+  const [booting, setBooting] = useState(true); // controla “piscar” da tela
   const [loading, setLoading] = useState(false);
 
   // biometria
@@ -73,10 +80,10 @@ export default function CaminhoneiroLogin() {
 
   const [deviceId, setDeviceId] = useState<string | null>(null);
 
-  // init
+  // --- Boot inicial
   useEffect(() => {
     (async () => {
-      // deviceId persistido (não é obrigatório para o kill global, mas útil para telemetria futura)
+      // 1) Garante deviceId
       let did = await Storage.getItem(STORAGE_KEYS.deviceId);
       if (!did) {
         did = uuidv4();
@@ -84,44 +91,50 @@ export default function CaminhoneiroLogin() {
       }
       setDeviceId(did);
 
-      // checa kill switch antes de qualquer coisa
-      await checkGate({ requireOnlineIfNeverValidated: true });
+      // 2) Valida gate
+      const allowed = await checkGate({ requireOnlineIfNeverValidated: true });
+      if (!allowed) {
+        setBooting(false);
+        return;
+      }
 
-      // se liberado, segue com auto-login e biometria
-      if (gateActive) {
-        const token = await Storage.getItem("authToken");
-        const role = await Storage.getItem("userRole");
-        if (token && role === "caminhoneiro") {
-          router.replace(FRETES_ROUTE);
-          return;
-        }
-
+      // 3) Tenta auto-login silencioso (sem pedir nada ao usuário)
+      const autoOk = await tryAutoLoginSilencioso();
+      if (!autoOk) {
+        // Prepara biometria para próxima tentativa (sem bloquear UI)
         const hasHardware = await LocalAuthentication.hasHardwareAsync();
         const enrolled = await LocalAuthentication.isEnrolledAsync();
         setBioAvailable(Boolean(hasHardware && enrolled));
-
         const flag = await Storage.getItem("biometricEnabled");
         setBioEnabled(flag === "1");
-
-        if (!triedBioOnce.current && hasHardware && enrolled && flag === "1") {
-          triedBioOnce.current = true;
-          await tryBiometricLogin({ silent: true });
-        }
       }
+      setBooting(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // revalida ao voltar para foreground
+  // Revalida gate ao voltar para foreground (mantém sessão fluída)
   useEffect(() => {
-    const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") checkGate();
+    const sub = AppState.addEventListener("change", async (state) => {
+      if (state === "active") {
+        const allowed = await checkGate();
+        if (allowed) {
+          // se já há token e role, garante que permanece logado
+          const token = await Storage.getItem("authToken");
+          const role = await Storage.getItem("userRole");
+          if (token && role === "caminhoneiro") {
+            // opcionalmente, poderíamos tentar refresh em background
+            return;
+          }
+          // se perdeu sessão, tenta refresh silencioso
+          await tryAutoLoginSilencioso();
+        }
+      }
     });
     return () => sub.remove();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --------- Kill Switch (Global) ----------
+  // --------- Gate ----------
   async function checkGate(opts?: { requireOnlineIfNeverValidated?: boolean }) {
     const requireOnlineIfNeverValidated = opts?.requireOnlineIfNeverValidated ?? false;
     setGateChecking(true);
@@ -140,7 +153,7 @@ export default function CaminhoneiroLogin() {
         active = Boolean(data?.active);
         message = (data?.message ?? "") || (active ? "" : "Aplicativo bloqueado.");
       } catch {
-        // sem internet — decide pelo cache
+        // offline — decide pelo cache
       }
 
       if (ok) {
@@ -168,7 +181,7 @@ export default function CaminhoneiroLogin() {
       );
       setGateChecking(false);
       return allowByGrace;
-    } catch (e) {
+    } catch {
       setGateActive(false);
       setGateMessage("Erro ao validar o aplicativo.");
       setGateChecking(false);
@@ -176,7 +189,62 @@ export default function CaminhoneiroLogin() {
     }
   }
 
-  // --------- Login ----------
+  // --------- Auto-login silencioso ----------
+  async function tryAutoLoginSilencioso(): Promise<boolean> {
+    try {
+      // 1) Se já há token + role, entra direto
+      const [token, role] = await Promise.all([
+        Storage.getItem("authToken"),
+        Storage.getItem("userRole"),
+      ]);
+      if (token && role === "caminhoneiro") {
+        router.replace(FRETES_ROUTE);
+        return true;
+      }
+
+      // 2) Caso tenha refreshToken, tenta refresh e entra
+      const refreshToken = await Storage.getItem("refreshToken");
+      if (refreshToken) {
+        const res = await fetch(`${API_BASE}/api/mobile/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken }),
+        });
+        const raw = await res.text().catch(() => "");
+        let data: LoginResponse | null = null;
+        try {
+          data = raw ? (JSON.parse(raw) as LoginResponse) : null;
+        } catch {}
+        if (res.ok && data?.token) {
+          await Storage.setItem("authToken", data.token);
+          await Storage.setItem("userRole", data.user?.role ?? "caminhoneiro");
+          await Storage.setItem("userId", String(data.user?.id ?? ""));
+          if (data.refreshToken) await Storage.setItem("refreshToken", data.refreshToken);
+          // registra push no backend
+          registerPushTokenOnBackend(API_BASE).catch(() => {});
+          router.replace(FRETES_ROUTE);
+          return true;
+        }
+      }
+
+      // 3) Se biometria estiver habilitada, tenta silenciosamente
+      const enabledFlag = await Storage.getItem("biometricEnabled");
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      if (enabledFlag === "1" && hasHardware && enrolled && !triedBioOnce.current) {
+        triedBioOnce.current = true;
+        const ok = await tryBiometricLogin({ silent: true });
+        if (ok) return true;
+      }
+
+      // sem sessão válida
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  // --------- Login manual ----------
   function formatarCpf(v: string) {
     return v
       .replace(/\D/g, "")
@@ -229,31 +297,38 @@ export default function CaminhoneiroLogin() {
       await Storage.setItem("userId", String(data.user?.id ?? ""));
       if (data.refreshToken) await Storage.setItem("refreshToken", data.refreshToken);
 
-      registerPushTokenOnBackend(API_BASE).catch((e) =>
-        console.log("Falha ao registrar push token:", e)
-      );
+      // registra push
+      registerPushTokenOnBackend(API_BASE).catch(() => {});
 
-      if (bioAvailable && !bioEnabled) {
-        Alert.alert(
-          Platform.OS === "ios" ? "Ativar Face ID?" : "Ativar biometria?",
-          "Você quer entrar sem digitar senha nas próximas vezes?",
-          [
-            { text: "Agora não", onPress: () => router.replace(FRETES_ROUTE), style: "cancel" },
-            {
-              text: "Ativar",
-              onPress: async () => {
-                await Storage.setItem("bio_cpf", cpfNumerico);
-                await Storage.setItem("bio_pw", senha);
-                await Storage.setItem("biometricEnabled", "1");
-                setBioEnabled(true);
-                router.replace(FRETES_ROUTE);
+      // pergunta biometria apenas como comodidade (não é necessária para auto-login)
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      setBioAvailable(Boolean(hasHardware && enrolled));
+      if (hasHardware && enrolled) {
+        const flag = await Storage.getItem("biometricEnabled");
+        if (flag !== "1") {
+          Alert.alert(
+            Platform.OS === "ios" ? "Ativar Face ID?" : "Ativar biometria?",
+            "Você quer entrar sem digitar senha nas próximas vezes?",
+            [
+              { text: "Agora não", onPress: () => router.replace(FRETES_ROUTE), style: "cancel" },
+              {
+                text: "Ativar",
+                onPress: async () => {
+                  await Storage.setItem("bio_cpf", cpfNumerico);
+                  await Storage.setItem("bio_pw", senha);
+                  await Storage.setItem("biometricEnabled", "1");
+                  setBioEnabled(true);
+                  router.replace(FRETES_ROUTE);
+                },
               },
-            },
-          ]
-        );
-      } else {
-        router.replace(FRETES_ROUTE);
+            ]
+          );
+          return;
+        }
       }
+
+      router.replace(FRETES_ROUTE);
     } catch (e) {
       console.error(e);
       setErro("Erro ao tentar entrar. Verifique sua conexão e tente novamente.");
@@ -262,6 +337,7 @@ export default function CaminhoneiroLogin() {
     }
   }
 
+  // --------- Biometria (opcional) ----------
   async function tryBiometricLogin(opts: { silent?: boolean } = {}) {
     const { silent } = opts;
     try {
@@ -315,7 +391,7 @@ export default function CaminhoneiroLogin() {
         return false;
       }
 
-      // tenta refresh token
+      // tenta refresh
       const refreshToken = await Storage.getItem("refreshToken");
       if (refreshToken) {
         const res = await fetch(`${API_BASE}/api/mobile/refresh`, {
@@ -332,12 +408,14 @@ export default function CaminhoneiroLogin() {
           await Storage.setItem("authToken", okData.token);
           await Storage.setItem("userRole", okData.user?.role ?? "caminhoneiro");
           await Storage.setItem("userId", String(okData.user?.id ?? ""));
+          if (okData.refreshToken) await Storage.setItem("refreshToken", okData.refreshToken);
+          registerPushTokenOnBackend(API_BASE).catch(() => {});
           router.replace(FRETES_ROUTE);
           return true;
         }
       }
 
-      // fallback: credenciais salvas
+      // fallback: credenciais salvas (apenas se usuário optou por biometria)
       const savedCpf = await Storage.getItem("bio_cpf");
       const savedPw = await Storage.getItem("bio_pw");
       if (!savedCpf || !savedPw) {
@@ -365,6 +443,8 @@ export default function CaminhoneiroLogin() {
         await Storage.setItem("authToken", data.token);
         await Storage.setItem("userRole", data.user?.role ?? "caminhoneiro");
         await Storage.setItem("userId", String(data.user?.id ?? ""));
+        if (data.refreshToken) await Storage.setItem("refreshToken", data.refreshToken);
+        registerPushTokenOnBackend(API_BASE).catch(() => {});
         router.replace(FRETES_ROUTE);
         return true;
       }
@@ -381,11 +461,13 @@ export default function CaminhoneiroLogin() {
   }
 
   // --------- UI ----------
-  if (gateChecking) {
+  if (booting || gateChecking) {
     return (
       <SafeAreaView style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
         <ActivityIndicator />
-        <Text style={{ marginTop: 8 }}>Validando aplicativo...</Text>
+        <Text style={{ marginTop: 8 }}>
+          {gateChecking ? "Validando aplicativo..." : "Carregando..."}
+        </Text>
       </SafeAreaView>
     );
   }
@@ -409,7 +491,10 @@ export default function CaminhoneiroLogin() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }} edges={["top", "left", "right"]}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
         <View style={[styles.header, { paddingTop: (insets.top ?? 0) + 12 }]}>
           <Text style={styles.brand}>
             vou<Text style={{ color: "#000" }}>carregar</Text>
@@ -454,6 +539,8 @@ export default function CaminhoneiroLogin() {
               style={styles.eyeBtn}
               activeOpacity={0.8}
               disabled={loading}
+              accessibilityRole="button"
+              accessibilityLabel={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
             >
               <Text style={{ fontSize: 16 }}>{mostrarSenha ? "🔒" : "👁️"}</Text>
             </TouchableOpacity>
@@ -490,6 +577,30 @@ export default function CaminhoneiroLogin() {
               Ainda não tem conta? Cadastre-se aqui
             </Text>
           </TouchableOpacity>
+
+          {/* Link interno para Política de Privacidade (requisito Apple 5.1.1) */}
+          <View style={{ width: "100%", marginTop: 22, alignItems: "center" }}>
+            <Text style={{ fontSize: 12, color: "#6b7280", textAlign: "center", paddingHorizontal: 8 }}>
+              Ao continuar, você declara que leu e concorda com nossa
+            </Text>
+            <TouchableOpacity
+              onPress={() => router.push("/politica-privacidade")}
+              style={{ paddingVertical: 6 }}
+              accessibilityRole="link"
+              accessibilityLabel="Abrir Política de Privacidade"
+            >
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontWeight: "700",
+                  color: "#dc2626",
+                  textDecorationLine: "underline",
+                }}
+              >
+                Política de Privacidade
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

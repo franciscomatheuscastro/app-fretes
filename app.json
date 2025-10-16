@@ -3,14 +3,14 @@
     "name": "Vou Carregar",
     "slug": "motorista-fretes",
 
-    "version": "1.0.2",              
+    "version": "1.0.3",              
     "icon": "./assets/images/icon.png",
 
     "scheme": "voucarregar",
 
     "android": {
       "package": "br.voucarregar.motoristafretes",
-      "versionCode": 3,               
+      "versionCode": 4,               
       "icon": "./assets/images/icon.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
@@ -47,7 +47,7 @@
     "ios": {
       "bundleIdentifier": "br.voucarregar.motoristafretes",
       "supportsTablet": true,
-      "buildNumber": "3",
+      "buildNumber": "4",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Usamos o Face ID para você entrar rapidamente no app.",
         "ITSAppUsesNonExemptEncryption": false,

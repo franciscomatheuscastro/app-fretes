@@ -8,7 +8,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 const SUPPORT = {
   whatsappE164: "5551989133934", // DDI 55 + DDD 51 + número
   whatsappMsg: "Olá! Preciso de ajuda no app Vou Carregar.",
-  email: "suporte@voucarregar.com.br",
+  email: "contato@voucarregar.com.br",
   phoneE164: "5551989133934",
   phoneDisplay: "(51) 9 8913-3934",
   helpCenterUrl: "https://app.voucarregar.com.br/ajuda", // opcional

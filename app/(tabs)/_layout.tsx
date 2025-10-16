@@ -1,4 +1,3 @@
-// app/(tabs)/_layout.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
@@ -26,7 +25,9 @@ export default function TabsLayout() {
         router.replace("/");
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [router]);
 
   if (!ready) {
@@ -39,7 +40,7 @@ export default function TabsLayout() {
 
   return (
     <Tabs
-      initialRouteName="home"
+      initialRouteName="fretes" // ← Fretes vira a “home” das tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: "#ea580c",
@@ -47,39 +48,43 @@ export default function TabsLayout() {
         tabBarStyle: { borderTopWidth: 1, borderTopColor: "#e5e7eb", backgroundColor: "#fff" },
       }}
     >
-      <Tabs.Screen
-        name="home"
-        options={{
-          title: "Home",
-          tabBarIcon: ({ color, size }) => <Ionicons name="home-outline" size={size} color={color} />,
-        }}
-      />
+      {/* Home oculta (não aparece na tab bar e não tem deep link) */}
+      <Tabs.Screen name="home" options={{ href: null }} />
+
       <Tabs.Screen
         name="fretes"
         options={{
-          title: "Fretes",
-          tabBarIcon: ({ color, size }) => <Ionicons name="cube-outline" size={size} color={color} />,
+          title: "Home",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home-outline" size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="notificacoes"
         options={{
           title: "Notificações",
-          tabBarIcon: ({ color, size }) => <Ionicons name="notifications-outline" size={size} color={color} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="notifications-outline" size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="ajuda"
         options={{
           title: "Ajuda",
-          tabBarIcon: ({ color, size }) => <Ionicons name="help-buoy-outline" size={size} color={color} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="help-buoy-outline" size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="perfil"
         options={{
           title: "Perfil",
-          tabBarIcon: ({ color, size }) => <Ionicons name="person-outline" size={size} color={color} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-outline" size={size} color={color} />
+          ),
         }}
       />
 
