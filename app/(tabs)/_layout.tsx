@@ -48,8 +48,7 @@ export default function TabsLayout() {
         tabBarStyle: { borderTopWidth: 1, borderTopColor: "#e5e7eb", backgroundColor: "#fff" },
       }}
     >
-      {/* Home oculta (não aparece na tab bar e não tem deep link) */}
-      <Tabs.Screen name="home" options={{ href: null }} />
+      
 
       <Tabs.Screen
         name="fretes"
@@ -88,8 +87,7 @@ export default function TabsLayout() {
         }}
       />
 
-      {/* Oculta qualquer rota app/(tabs)/explore* da aba */}
-      <Tabs.Screen name="explore" options={{ href: null }} />
+
     </Tabs>
   );
 }

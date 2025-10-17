@@ -568,6 +568,8 @@ export default function CaminhoneiroLogin() {
             </TouchableOpacity>
           )}
 
+          {/* ...já tinha recuperar senha e cadastro... */}
+
           <TouchableOpacity onPress={() => router.push("/recuperar-senha")} style={{ marginTop: 14 }} disabled={loading}>
             <Text style={{ color: "#dc2626", fontSize: 13, fontWeight: "600" }}>Esqueceu sua senha?</Text>
           </TouchableOpacity>
@@ -578,7 +580,20 @@ export default function CaminhoneiroLogin() {
             </Text>
           </TouchableOpacity>
 
-          {/* Link interno para Política de Privacidade (requisito Apple 5.1.1) */}
+          {/* NOVO: link público para a Ajuda */}
+          <TouchableOpacity
+            onPress={() => router.push("/ajuda")}
+            style={{ marginTop: 10, paddingVertical: 6 }}
+            accessibilityRole="link"
+            accessibilityLabel="Abrir Ajuda e Suporte"
+            disabled={loading}
+          >
+            <Text style={{ color: "#dc2626", fontSize: 13, fontWeight: "700" }}>
+              Precisa de ajuda?
+            </Text>
+          </TouchableOpacity>
+
+          {/* Link interno para Política de Privacidade */}
           <View style={{ width: "100%", marginTop: 22, alignItems: "center" }}>
             <Text style={{ fontSize: 12, color: "#6b7280", textAlign: "center", paddingHorizontal: 8 }}>
               Ao continuar, você declara que leu e concorda com nossa
@@ -601,6 +616,7 @@ export default function CaminhoneiroLogin() {
               </Text>
             </TouchableOpacity>
           </View>
+
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

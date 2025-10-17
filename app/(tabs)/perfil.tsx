@@ -1,5 +1,4 @@
 // app/(tabs)/perfil.tsx
-import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import React, { useCallback, useEffect, useState } from "react";
@@ -64,7 +63,7 @@ function maskPhone(v = "") {
 
 export default function Perfil() {
   const router = useRouter();
-  const insets = useSafeAreaInsets(); // 👈 safe area
+  const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -145,17 +144,6 @@ export default function Perfil() {
     router.replace("/"); // volta pro login
   }
 
-  async function abrirCNH() {
-    if (!dados.cnh) {
-      Alert.alert("Documento", "CNH não enviada.");
-      return;
-    }
-    const url = dados.cnh;
-    const can = await Linking.canOpenURL(url);
-    if (can) Linking.openURL(url);
-    else Alert.alert("Documento", "Não foi possível abrir o documento.");
-  }
-
   if (loading) {
     return (
       <SafeAreaView style={[styles.center, { paddingTop: (insets.top ?? 0) + 8 }]} edges={["top", "left", "right"]}>
@@ -175,6 +163,17 @@ export default function Perfil() {
       >
         <Text style={styles.title}>👤 Meu Perfil</Text>
 
+        {/* Selo de privacidade */}
+        <TouchableOpacity
+          onPress={() => router.push("/politica-privacidade")}
+          activeOpacity={0.9}
+          style={styles.privacyTag}
+          accessibilityRole="link"
+          accessibilityLabel="Abrir Política de Privacidade"
+        >
+          <Text style={styles.privacyTagText}>🔒 Seus dados estão seguros na Vou Carregar</Text>
+        </TouchableOpacity>
+
         {!!erro && (
           <View style={styles.alert}>
             <Text style={styles.alertText}>{erro}</Text>
@@ -188,14 +187,10 @@ export default function Perfil() {
           <Linha rotulo="Telefone" valor={dados.telefone ? maskPhone(dados.telefone) : "—"} />
           <Linha rotulo="Endereço" valor={formatEndereco(dados)} />
           <Linha rotulo="CEP" valor={dados.cep || "—"} />
-          <Linha rotulo="Aceita WhatsApp" valor={dados.aceitaWhatsapp ? "Sim" : "Não"} />
-          <Linha rotulo="Status" valor={dados.status || "—"} />
+
+          {/* Removidos: Aceita WhatsApp, Status e botão de CNH */}
 
           <View style={{ marginTop: 12, gap: 8 }}>
-            <TouchableOpacity style={styles.btnDoc} onPress={abrirCNH} activeOpacity={0.9}>
-              <Text style={styles.btnDocText}>📄 Visualizar CNH</Text>
-            </TouchableOpacity>
-
             <TouchableOpacity style={styles.btnSair} onPress={sair} activeOpacity={0.9}>
               <Text style={styles.btnSairText}>Sair</Text>
             </TouchableOpacity>
@@ -227,7 +222,19 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#f9fafb" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f9fafb" },
 
-  title: { fontSize: 20, fontWeight: "800", color: "#111827", marginBottom: 12 },
+  title: { fontSize: 20, fontWeight: "800", color: "#111827", marginBottom: 8 },
+
+  privacyTag: {
+    alignSelf: "flex-start",
+    backgroundColor: "#ecfeff",
+    borderColor: "#a5f3fc",
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    marginBottom: 12,
+  },
+  privacyTagText: { color: "#0e7490", fontWeight: "800", fontSize: 12 },
 
   alert: {
     backgroundColor: "#fee2e2",
@@ -251,14 +258,6 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: "#6b7280", marginBottom: 2, fontWeight: "600" },
   value: { fontSize: 15, color: "#111827" },
   valueStrong: { fontWeight: "800" },
-
-  btnDoc: {
-    backgroundColor: "#1f2937",
-    paddingVertical: 10,
-    alignItems: "center",
-    borderRadius: 10,
-  },
-  btnDocText: { color: "#fff", fontWeight: "800" },
 
   btnSair: {
     backgroundColor: "#ef4444",
