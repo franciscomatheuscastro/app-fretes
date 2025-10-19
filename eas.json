@@ -16,6 +16,13 @@
       "channel": "production",
       "android": { "buildType": "app-bundle" },
       "env": { "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br" }
+    },
+    "simulator": {
+      "ios": { "simulator": true },
+      "env": { "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br" }
     }
+  },
+  "submit": {
+    "production": {}
   }
 }
