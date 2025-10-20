@@ -67,6 +67,7 @@ export default function Perfil() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
   const [erro, setErro] = useState("");
   const [dados, setDados] = useState<CaminhoneiroDados>(VAZIO);
 
@@ -134,14 +135,81 @@ export default function Perfil() {
     setRefreshing(false);
   }, [carregar]);
 
-  async function sair() {
+  async function limparSessao() {
     if (Platform.OS !== "web") {
       await SecureStore.deleteItemAsync("authToken");
       await SecureStore.deleteItemAsync("userRole");
       await SecureStore.deleteItemAsync("userId");
     }
+  }
+
+  async function sair() {
+    await limparSessao();
     Alert.alert("Até logo!", "Você saiu da sua conta.");
     router.replace("/"); // volta pro login
+  }
+
+  async function excluirContaConfirmada() {
+    try {
+      setExcluindo(true);
+
+      const [token, userId, userRole] = await Promise.all([
+        Platform.OS === "web" ? null : SecureStore.getItemAsync("authToken"),
+        Platform.OS === "web" ? null : SecureStore.getItemAsync("userId"),
+        Platform.OS === "web" ? null : SecureStore.getItemAsync("userRole"),
+      ]);
+
+      if (!token || !userId) {
+        Alert.alert("Sessão expirada", "Faça login novamente para excluir a conta.");
+        return;
+      }
+
+      // Por padrão, este app é do caminhoneiro
+      const tipo = (userRole || "caminhoneiro") as "caminhoneiro" | "empresa";
+
+      const res = await fetch(`${API_BASE}/api/account`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+          "x-auth-tipo": tipo,
+          "x-auth-id": userId,
+        },
+      });
+
+      if (!res.ok) {
+        const msg = await res.json().catch(() => ({}));
+        throw new Error(msg?.error || "Falha ao excluir a conta.");
+      }
+
+      await limparSessao();
+
+      Alert.alert(
+        "Conta excluída",
+        "Sua conta foi excluída com sucesso. Sentiremos sua falta!",
+        [{ text: "OK", onPress: () => router.replace("/") }]
+      );
+    } catch (e: any) {
+      console.error("Excluir conta:", e?.message || e);
+      Alert.alert("Erro", e?.message || "Não foi possível excluir sua conta agora.");
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
+  function excluirConta() {
+    Alert.alert(
+      "Excluir conta",
+      "Esta ação é permanente e não pode ser desfeita. Seus dados de conta serão removidos. Alguns registros mínimos podem ser retidos apenas para cumprimento de obrigações legais (por exemplo, documentos fiscais), mas seus dados pessoais de perfil serão excluídos/anonimizados.\n\nDeseja continuar?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir definitivamente",
+          style: "destructive",
+          onPress: excluirContaConfirmada,
+        },
+      ]
+    );
   }
 
   if (loading) {
@@ -188,9 +256,24 @@ export default function Perfil() {
           <Linha rotulo="Endereço" valor={formatEndereco(dados)} />
           <Linha rotulo="CEP" valor={dados.cep || "—"} />
 
-          {/* Removidos: Aceita WhatsApp, Status e botão de CNH */}
-
           <View style={{ marginTop: 12, gap: 8 }}>
+            {/* Excluir conta */}
+            <TouchableOpacity
+              style={[styles.btnExcluir, excluindo && styles.btnDisabled]}
+              onPress={excluirConta}
+              activeOpacity={0.9}
+              disabled={excluindo}
+              accessibilityRole="button"
+              accessibilityLabel="Excluir conta"
+            >
+              {excluindo ? (
+                <ActivityIndicator />
+              ) : (
+                <Text style={styles.btnExcluirText}>Excluir conta</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Sair */}
             <TouchableOpacity style={styles.btnSair} onPress={sair} activeOpacity={0.9}>
               <Text style={styles.btnSairText}>Sair</Text>
             </TouchableOpacity>
@@ -258,6 +341,20 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: "#6b7280", marginBottom: 2, fontWeight: "600" },
   value: { fontSize: 15, color: "#111827" },
   valueStrong: { fontWeight: "800" },
+
+  btnExcluir: {
+    backgroundColor: "#fff",
+    borderWidth: 2,
+    borderColor: "#ef4444",
+    paddingVertical: 12,
+    alignItems: "center",
+    borderRadius: 10,
+  },
+  btnExcluirText: { color: "#ef4444", fontWeight: "800" },
+
+  btnDisabled: {
+    opacity: 0.6,
+  },
 
   btnSair: {
     backgroundColor: "#ef4444",

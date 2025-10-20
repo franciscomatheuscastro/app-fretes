@@ -10,7 +10,7 @@ jobs:
       - name: Download IPA from Expo
         run: |
           set -e
-          IPA_URL="https://expo.dev/artifacts/eas/5JQgQYZQiNB7R1UVvbsQqs.ipa"
+          IPA_URL="https://expo.dev/artifacts/eas/5xMZNmU3Ekfq4LN1WSfK1E.ipa"
           echo "Baixando: $IPA_URL"
           curl -fL "$IPA_URL" -o app.ipa
           ls -lh app.ipa

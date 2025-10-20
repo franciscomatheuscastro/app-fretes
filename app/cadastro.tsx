@@ -327,7 +327,7 @@ export default function CadastroCaminhoneiro() {
             />
 
             <TextInput
-              placeholder="Rua"
+              placeholder="Rua e número"
               value={form.rua}
               onChangeText={(v) => atualizar("rua", v)}
               style={styles.input}
