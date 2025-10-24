@@ -17,14 +17,11 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Storage from "../../backend/lib/storage";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+/**
+ * IMPORTANTE:
+ * Não defina setNotificationHandler aqui — já está no app/_layout.tsx (global).
+ * iOS precisa do handler global para exibir notificações em foreground.
+ */
 
 type SavedNotif = {
   id: string;
@@ -104,7 +101,7 @@ export default function Notificacoes() {
     }
   }, []);
 
-  // Importa notificações apresentadas na bandeja (quando possível)
+  // Importa notificações apresentadas (quando possível)
   const syncDelivered = useCallback(async () => {
     try {
       const delivered = await Notifications.getPresentedNotificationsAsync();
@@ -282,6 +279,7 @@ export default function Notificacoes() {
             <TouchableOpacity
               style={[styles.smallBtn, { backgroundColor: "#2563eb" }]}
               onPress={requestPermission}
+              activeOpacity={0.9}
             >
               <Text style={styles.smallBtnText}>Permitir</Text>
             </TouchableOpacity>
@@ -291,6 +289,7 @@ export default function Notificacoes() {
             <TouchableOpacity
               style={[styles.smallBtn, { backgroundColor: "#ef4444" }]}
               onPress={handleClear}
+              activeOpacity={0.9}
             >
               <Text style={styles.smallBtnText}>Limpar</Text>
             </TouchableOpacity>

@@ -1,19 +1,30 @@
 // app/politica-privacidade.tsx
 import { Stack, useRouter } from "expo-router";
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 const EMAIL = "contato@voucarregar.com.br";
 
 export default function PoliticaDePrivacidade() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#fff" }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }} edges={["top", "left", "right"]}>
+      {/* Mostra título no header nativo */}
       <Stack.Screen options={{ title: "Política de Privacidade" }} />
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator>
+      <ScrollView
+        showsVerticalScrollIndicator
+        contentContainerStyle={[
+          styles.content,
+          // mais “respiro” no topo: safe-area + 20px
+          { paddingTop: (insets.top || 0) + 20 },
+        ]}
+      >
         <Text style={styles.h1}>Política de Privacidade – Vou Carregar</Text>
         <Text style={styles.muted}>Última atualização: 12/10/2025</Text>
+
         <Text style={styles.p}>
           Bem-vindo(a) ao Vou Carregar. Esta Política de Privacidade descreve como coletamos,
           utilizamos, compartilhamos e protegemos seus dados ao usar nosso aplicativo para
@@ -39,6 +50,7 @@ export default function PoliticaDePrivacidade() {
         </Text>
 
         <Text style={styles.h2}>3. Quais dados coletamos</Text>
+
         <Text style={styles.h3}>3.1 Dados informados por você</Text>
         <Text style={styles.li}>
           • Conta e perfil: nome, e-mail, telefone/WhatsApp, CPF e, quando aplicável, dados de
@@ -61,8 +73,8 @@ export default function PoliticaDePrivacidade() {
         <Text style={styles.li}>• Uso do App: telas acessadas, cliques, pesquisas e eventos técnicos.</Text>
         <Text style={styles.li}>• Notificações push: token técnico (Expo/FCM) para envio de notificações.</Text>
         <Text style={styles.note}>
-          Importante: a versão atual do App <Text style={{ fontWeight: "700" }}>não solicita nem coleta sua localização</Text>. A
-          busca por fretes é feita por cidades informadas manualmente. Caso, no futuro, a
+          Importante: a versão atual do App <Text style={{ fontWeight: "700" }}>não solicita nem coleta sua localização</Text>.
+          A busca por fretes é feita por cidades informadas manualmente. Caso, no futuro, a
           localização seja utilizada, pediremos permissão explícita e atualizaremos esta política.
         </Text>
 
@@ -163,22 +175,27 @@ export default function PoliticaDePrivacidade() {
           <Text style={styles.li}>• Sem coleta de localização na versão atual.</Text>
         </View>
 
-        <TouchableOpacity onPress={() => router.back()} style={{ alignSelf: "center", paddingVertical: 16 }}>
+        <TouchableOpacity onPress={() => router.back()} style={{ alignSelf: "center", paddingVertical: 20 }}>
           <Text style={{ color: "#6b7280" }}>Voltar</Text>
         </TouchableOpacity>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  // aumentei o espaçamento lateral (24) e mantive bom padding inferior
-  content: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40 },
-  h1: { fontSize: 20, fontWeight: "800", color: "#111827" },
+  // padding lateral maior e topo dinâmico (aplicado no componente)
+  content: { paddingHorizontal: 24, paddingBottom: 40 },
+
+  h1: { fontSize: 20, fontWeight: "800", color: "#111827", marginBottom: 2 },
+  muted: { fontSize: 12, color: "#6b7280", marginBottom: 8 },
+
   h2: { fontSize: 16, fontWeight: "800", color: "#111827", marginTop: 18 },
   h3: { fontSize: 14, fontWeight: "800", color: "#111827", marginTop: 12 },
+
   p: { fontSize: 14, color: "#111827", marginTop: 8, lineHeight: 20 },
   li: { fontSize: 14, color: "#111827", marginTop: 6, lineHeight: 20 },
+
   note: {
     fontSize: 13,
     color: "#374151",
@@ -187,8 +204,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginTop: 8,
   },
-  muted: { fontSize: 12, color: "#6b7280", marginTop: 4 },
+
   link: { color: "#2563eb", textDecorationLine: "underline" },
+
   card: {
     backgroundColor: "#F9FAFB",
     borderWidth: 1,

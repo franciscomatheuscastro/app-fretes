@@ -23,7 +23,7 @@ import * as Storage from "../../../backend/lib/storage";
 
 const API_BASE = "https://app.voucarregar.com.br";
 
-/* ================= Tipos ================= */
+/* =============== Tipos =============== */
 type Frete = {
   id: string | number;
   cidadeColeta: string;     // "Cidade - UF - País"
@@ -48,7 +48,7 @@ type EstadoIBGE = {
 };
 type MunicipioIBGE = { id: number; nome: string };
 
-/* ================= Helpers ================= */
+/* =============== Helpers =============== */
 function toLowerNoAccent(v: string) {
   return (v || "")
     .normalize("NFD")
@@ -113,11 +113,15 @@ function haversineKm(a: { lat: number; lon: number }, b: { lat: number; lon: num
   return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-/* ================= Listas ================= */
+/* =============== Listas =============== */
 const PAISES = ["Brasil", "Argentina", "Uruguai", "Chile"];
 const VEICULOS = [
   "3/4", "Fiorino", "Toco", "VLC", "Bitruck", "Truck",
-  "Bitrem", "Carreta", "Carreta LS", "Rodotrem", "Vanderléia",
+  "Bitrem", "Carreta", "Carreta LS", "Rodotrem", "Vanderléia", "4º Eixo"
+];
+const CARROCERIAS = [
+  "Baú","Baú Frigorífico","Baú Refrigerado","Sider","Caçamba","Grade Baixa","Graneleiro","Plataforma","Prancha",
+  "Apenas Cavalo","Bug Porta Container","Cavaqueira","Cegonheiro","Gaiola","Hopper","Munck","Silo","Tanque",
 ];
 
 /* ====== Parser da busca ====== */
@@ -129,7 +133,7 @@ function parseBusca(txt: string): { cidade: string; uf: string } {
   return { cidade: (m[1] || "").trim(), uf: (m[2] || "").toUpperCase().trim() };
 }
 
-/* ================= Componentes reutilizáveis ================= */
+/* =============== Componentes reutilizáveis =============== */
 
 const Tag = React.memo(function Tag({
   text, selected, onPress,
@@ -144,6 +148,60 @@ const Tag = React.memo(function Tag({
     </TouchableOpacity>
   );
 });
+
+/** Dropdown compacto de multiseleção (lista suspensa) */
+function MultiSelectDropdown({
+  label,
+  options,
+  selected,
+  onToggle,
+}: {
+  label: string;
+  options: string[];
+  selected: string[];
+  onToggle: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedText =
+    selected.length === 0 ? "Nenhum selecionado" :
+    selected.length === 1 ? selected[0] :
+    `${selected.length} selecionados`;
+
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={styles.sectionTitle}>{label}</Text>
+      <TouchableOpacity
+        onPress={() => setOpen((v) => !v)}
+        activeOpacity={0.9}
+        style={styles.dropdownHeader}
+      >
+        <Text style={{ color: "#111827", fontWeight: "700" }}>{selectedText}</Text>
+        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={16} color="#111827" />
+      </TouchableOpacity>
+
+      {open && (
+        <View style={styles.dropdownBody}>
+          {options.map((opt) => {
+            const isSel = selected.includes(opt);
+            return (
+              <TouchableOpacity
+                key={opt}
+                onPress={() => onToggle(opt)}
+                style={styles.dropdownItem}
+                activeOpacity={0.85}
+              >
+                <View style={[styles.checkbox, isSel && styles.checkboxOn]}>
+                  {isSel && <Ionicons name="checkmark" size={14} color="#fff" />}
+                </View>
+                <Text style={{ color: "#111827" }}>{opt}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
 
 type FiltrosSheetProps = {
   visible: boolean;
@@ -160,6 +218,7 @@ type FiltrosSheetProps = {
   estadoOrigem: string;
   cidadeOrigem: string;
   filtroVeiculos: string[];
+  filtroCarrocerias: string[];
   filtroTipoCarga: "todos" | "completa" | "complemento";
   raioKm: number | null;
 
@@ -169,6 +228,7 @@ type FiltrosSheetProps = {
   setEstadoOrigem: (v: string) => void;
   setCidadeOrigem: (v: string) => void;
   setFiltroVeiculos: (v: string[]) => void;
+  setFiltroCarrocerias: (v: string[]) => void;
   setFiltroTipoCarga: (v: "todos" | "completa" | "complemento") => void;
   setRaioKm: (v: number | null) => void;
 
@@ -184,9 +244,9 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
     visible, onClose,
     estados, regioes, cidadesOrigem,
     paisOrigem, regiaoOrigem, estadoOrigem, cidadeOrigem,
-    filtroVeiculos, filtroTipoCarga, raioKm,
+    filtroVeiculos, filtroCarrocerias, filtroTipoCarga, raioKm,
     setPaisOrigem, setRegiaoOrigem, setEstadoOrigem, setCidadeOrigem,
-    setFiltroVeiculos, setFiltroTipoCarga, setRaioKm,
+    setFiltroVeiculos, setFiltroCarrocerias, setFiltroTipoCarga, setRaioKm,
     onBuscar, onLimpar,
   } = props;
 
@@ -199,25 +259,20 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
   return (
     <Modal
       visible={visible}
-      // Transparência e estilo diferentes por plataforma para evitar glitches no Android
       transparent={Platform.OS === "ios"}
       statusBarTranslucent={Platform.OS === "android"}
-      presentationStyle={
-        Platform.select({ ios: "overFullScreen", android: "fullScreen" }) as any
-      }
+      presentationStyle={Platform.select({ ios: "overFullScreen", android: "fullScreen" }) as any}
       animationType={Platform.select({ ios: "slide", android: "fade" })}
       hardwareAccelerated
       onRequestClose={onClose}
     >
       <View style={styles.sheetBackdrop}>
-        {/* Backdrop - só fecha ao tocar fora */}
         <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
 
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={{ width: "100%" }}
         >
-          {/* Corpo do sheet - consome toques para não vazar para o backdrop */}
           <Pressable
             onPress={() => {}}
             onStartShouldSetResponder={() => true}
@@ -315,20 +370,21 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
                 </>
               )}
 
-              {/* Veículos */}
-              <Text style={styles.sectionTitle}>Veículos</Text>
-              <View style={styles.wrap}>
-                {VEICULOS.map((v) => (
-                  <Tag
-                    key={v}
-                    text={v}
-                    selected={filtroVeiculos.includes(v)}
-                    onPress={() =>
-                      toggle(filtroVeiculos, (arr) => setFiltroVeiculos(arr), v)
-                    }
-                  />
-                ))}
-              </View>
+              {/* Veículos (multiselect compacta) */}
+              <MultiSelectDropdown
+                label="Veículos"
+                options={VEICULOS}
+                selected={filtroVeiculos}
+                onToggle={(val) => toggle(filtroVeiculos, setFiltroVeiculos, val)}
+              />
+
+              {/* Carrocerias (multiselect compacta) */}
+              <MultiSelectDropdown
+                label="Carrocerias"
+                options={CARROCERIAS}
+                selected={filtroCarrocerias}
+                onToggle={(val) => toggle(filtroCarrocerias, setFiltroCarrocerias, val)}
+              />
 
               {/* Tipo de carga */}
               <Text style={styles.sectionTitle}>Tipo de carga</Text>
@@ -383,7 +439,7 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
   );
 });
 
-/* ================= Tela ================= */
+/* =============== Tela =============== */
 export default function FretesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -402,11 +458,12 @@ export default function FretesScreen() {
   // Filtros estruturados (modal)
   const [paisOrigem, setPaisOrigem] = useState<string>("Brasil");
   const [regiaoOrigem, setRegiaoOrigem] = useState<string>("");
-  const [estadoOrigem, setEstadoOrigem] = useState<string>(""); // sigla
+  const [estadoOrigem, setEstadoOrigem] = useState<string>("");
   const [cidadeOrigem, setCidadeOrigem] = useState<string>("");
   const [cidadeDestino] = useState<string>("");
 
   const [filtroVeiculos, setFiltroVeiculos] = useState<string[]>([]);
+  const [filtroCarrocerias, setFiltroCarrocerias] = useState<string[]>([]);
   const [filtroTipoCarga, setFiltroTipoCarga] = useState<"todos" | "completa" | "complemento">("todos");
   const [raioKm, setRaioKm] = useState<number | null>(null);
   const [coordsOrigem, setCoordsOrigem] = useState<{ lat: number; lon: number } | null>(null);
@@ -505,7 +562,7 @@ export default function FretesScreen() {
     })();
   }, [paisOrigem, estadoOrigem, cidadeOrigem, buscaAplicada, raioKm]);
 
-  // Filtro base (sem raio)
+  // Filtro base (sem travar cidade quando há raio)
   const fretesFiltradosBase = useMemo(() => {
     const parsed = parseBusca(buscaAplicada); // "Cidade" ou "Cidade, UF"
     const cidadeBusca = parsed.cidade || cidadeOrigem;
@@ -515,13 +572,16 @@ export default function FretesScreen() {
       const [cidadeC, estadoC, paisC] = (f.cidadeColeta || "").split(" - ").map((s) => (s || "").trim());
       const [cidadeE] = (f.cidadeEntrega || "").split(" - ").map((s) => (s || "").trim());
 
+      // País de origem
       if (paisOrigem && paisC && paisC !== paisOrigem) return false;
 
+      // Região de origem (se Brasil)
       if (paisOrigem === "Brasil" && regiaoOrigem) {
         const estObj = estados.find((e) => e.sigla === estadoC || toLowerNoAccent(e.nome) === toLowerNoAccent(estadoC || ""));
         if (estObj?.regiao.nome !== regiaoOrigem) return false;
       }
 
+      // UF de origem
       if (paisOrigem === "Brasil" && ufBusca) {
         const ok =
           estadoC === ufBusca ||
@@ -529,17 +589,24 @@ export default function FretesScreen() {
         if (!ok) return false;
       }
 
-      if (cidadeBusca) {
+      // Cidade de origem — **somente se NÃO houver raio**
+      if (!raioKm && cidadeBusca) {
         if (toLowerNoAccent(cidadeC || "") !== toLowerNoAccent(cidadeBusca)) return false;
       }
 
+      // (Opcional) cidade destino — mantido igual
       if (cidadeDestino) {
         const cidadeTxt = cidadeDestino.split("-")[0]?.trim() || "";
         if (toLowerNoAccent(cidadeE || "") !== toLowerNoAccent(cidadeTxt)) return false;
       }
 
+      // Veículos
       if (filtroVeiculos.length && !filtroVeiculos.some((v) => (f.veiculos || []).includes(v))) return false;
 
+      // Carrocerias
+      if (filtroCarrocerias.length && !filtroCarrocerias.some((c) => (f.carrocerias || []).includes(c))) return false;
+
+      // Tipo de carga
       if (filtroTipoCarga !== "todos") {
         const tipo = (f.tipoCarga || "").toLowerCase();
         if (tipo !== filtroTipoCarga) return false;
@@ -547,9 +614,12 @@ export default function FretesScreen() {
 
       return true;
     });
-  }, [fretes, buscaAplicada, paisOrigem, regiaoOrigem, estadoOrigem, cidadeOrigem, cidadeDestino, filtroVeiculos, filtroTipoCarga, estados]);
+  }, [
+    fretes, buscaAplicada, paisOrigem, regiaoOrigem, estadoOrigem, cidadeOrigem, cidadeDestino,
+    filtroVeiculos, filtroCarrocerias, filtroTipoCarga, estados, raioKm
+  ]);
 
-  // Prefetch coordenadas (com limite/pausa) para raio
+  // Prefetch coordenadas (com throttle) para TODOS os fretes base quando houver raio
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   useEffect(() => {
     let cancelled = false;
@@ -569,12 +639,13 @@ export default function FretesScreen() {
           }
         }
 
-        for (const key of keys.slice(0, 80)) {
+        // pega todos (com pausa p/ não tomar rate-limit)
+        for (const key of keys) {
           if (cancelled) break;
           if (!coordenadasCache.has(key)) {
             const [city, uf] = key.split(",");
             await buscarCoordenadas(city, uf);
-            await sleep(350);
+            await sleep(250);
           }
         }
 
@@ -587,14 +658,18 @@ export default function FretesScreen() {
     return () => { cancelled = true; };
   }, [fretesFiltradosBase, paisOrigem, raioKm, coordsOrigem]);
 
-  // Aplica RAIO
+  // Aplica RAIO (se coords de um frete ainda não carregaram, NÃO exclui — inclui provisoriamente)
   const fretesParaListar = useMemo(() => {
     if (!(paisOrigem === "Brasil" && raioKm && coordsOrigem)) return fretesFiltradosBase;
     return fretesFiltradosBase.filter((f) => {
       const [cidadeC, estadoC] = (f.cidadeColeta || "").split(" - ").map((s) => (s || "").trim());
+      if (!cidadeC || !estadoC) return false;
       const key = `${cidadeC},${estadoC}`;
       const coords = coordenadasCache.get(key);
-      if (!coords) return false; // regra igual ao site
+
+      // Sem coordenadas ainda? Inclui por enquanto (será reavaliado quando o prefetch terminar)
+      if (!coords) return true;
+
       const d = haversineKm(coordsOrigem, coords);
       return d <= (raioKm || 0);
     });
@@ -612,11 +687,11 @@ export default function FretesScreen() {
     setRegiaoOrigem("");
     setEstadoOrigem("");
     setCidadeOrigem("");
-    // setCidadeDestino("") // reservado
     setFiltroVeiculos([]);
+    setFiltroCarrocerias([]);
     setFiltroTipoCarga("todos");
     setRaioKm(null);
-    setFiltersSheetOpen(false); // fecha o modal ao limpar
+    setFiltersSheetOpen(false);
   }, []);
 
   const aplicarEBuscar = useCallback(() => {
@@ -690,7 +765,7 @@ export default function FretesScreen() {
     <View style={{ gap: 12, paddingTop: 8, paddingBottom: 4 }}>
       <View style={styles.searchCard}>
         <TextInput
-          placeholder="Cidade ou Cidade, UF (ex.: Seberi, RS)"
+          placeholder="Cidade ou Cidade, UF (ex.: Porto Alegre, RS)"
           placeholderTextColor="#9ca3af"
           value={inputBusca}
           onChangeText={setInputBusca}
@@ -725,10 +800,11 @@ export default function FretesScreen() {
     !!estadoOrigem ||
     !!cidadeOrigem ||
     !!filtroVeiculos.length ||
+    !!filtroCarrocerias.length ||
     filtroTipoCarga !== "todos" ||
     !!raioKm;
 
-  /* ================= UI ================= */
+  /* =============== UI =============== */
   if (loading) {
     return (
       <SafeAreaView style={[styles.center, { paddingTop: (insets.top ?? 0) + 8 }]} edges={["top", "left", "right"]}>
@@ -768,7 +844,7 @@ export default function FretesScreen() {
         removeClippedSubviews={false}
       />
 
-      {/* Modal de Filtros — componente externo estável */}
+      {/* Modal de Filtros */}
       <FiltrosSheet
         visible={filtersSheetOpen}
         onClose={() => setFiltersSheetOpen(false)}
@@ -780,6 +856,7 @@ export default function FretesScreen() {
         estadoOrigem={estadoOrigem}
         cidadeOrigem={cidadeOrigem}
         filtroVeiculos={filtroVeiculos}
+        filtroCarrocerias={filtroCarrocerias}
         filtroTipoCarga={filtroTipoCarga}
         raioKm={raioKm}
         setPaisOrigem={setPaisOrigem}
@@ -787,6 +864,7 @@ export default function FretesScreen() {
         setEstadoOrigem={setEstadoOrigem}
         setCidadeOrigem={setCidadeOrigem}
         setFiltroVeiculos={setFiltroVeiculos}
+        setFiltroCarrocerias={setFiltroCarrocerias}
         setFiltroTipoCarga={setFiltroTipoCarga}
         setRaioKm={setRaioKm}
         onBuscar={aplicarEBuscar}
@@ -806,7 +884,7 @@ function tempoRelativo(iso?: string | null) {
   return `${d} dia${d === 1 ? "" : "s"}`;
 }
 
-/* ================= Estilos ================= */
+/* =============== Estilos =============== */
 const styles = StyleSheet.create({
   // Botões do bottom-sheet
   btnPrimary: {
@@ -816,6 +894,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
   },
+  
+  helper: { color: "#6b7280", fontSize: 12, marginTop: 6 },
+
   btnPrimaryText: { color: "#fff", fontWeight: "800" },
   btnSecondary: {
     backgroundColor: "#e5e7eb",
@@ -872,6 +953,42 @@ const styles = StyleSheet.create({
 
   picker: { backgroundColor: "#fff", borderRadius: 10, borderColor: "#e5e7eb", borderWidth: 1 },
 
+  // Dropdown multi
+  dropdownHeader: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    borderColor: "#e5e7eb",
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  dropdownBody: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    borderColor: "#e5e7eb",
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  dropdownItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderBottomColor: "#f3f4f6",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  checkbox: {
+    width: 18, height: 18, borderRadius: 4,
+    borderColor: "#9ca3af", borderWidth: 1,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "#fff",
+  },
+  checkboxOn: { backgroundColor: "#111827", borderColor: "#111827" },
+
   // Card de frete
   card: {
     marginHorizontal: 12,
@@ -915,7 +1032,6 @@ const styles = StyleSheet.create({
   },
   sheetHandle: { alignSelf: "center", width: 48, height: 4, borderRadius: 999, backgroundColor: "#e5e7eb", marginBottom: 6 },
   sectionTitle: { fontWeight: "800", color: "#111827", marginTop: 2, marginBottom: 4 },
-  helper: { color: "#6b7280", fontSize: 12, marginTop: 6 },
 
   // Linhas cidade
   cityRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
