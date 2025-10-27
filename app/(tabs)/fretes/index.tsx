@@ -124,7 +124,7 @@ const CARROCERIAS = [
   "Apenas Cavalo","Bug Porta Container","Cavaqueira","Cegonheiro","Gaiola","Hopper","Munck","Silo","Tanque",
 ];
 
-/* ====== Parser da busca ====== */
+/* ====== Parser da busca livre (origem) ====== */
 function parseBusca(txt: string): { cidade: string; uf: string } {
   const clean = (txt || "").trim();
   if (!clean) return { cidade: "", uf: "" };
@@ -211,22 +211,39 @@ type FiltrosSheetProps = {
   estados: EstadoIBGE[];
   regioes: string[];
   cidadesOrigem: string[];
+  cidadesDestino: string[];
 
-  // valores
+  // ORIGEM
   paisOrigem: string;
   regiaoOrigem: string;
   estadoOrigem: string;
   cidadeOrigem: string;
+
+  // DESTINO
+  paisDestino: string;
+  regiaoDestino: string;
+  estadoDestino: string;
+  cidadeDestino: string;
+
+  // comuns
   filtroVeiculos: string[];
   filtroCarrocerias: string[];
   filtroTipoCarga: "todos" | "completa" | "complemento";
   raioKm: number | null;
 
-  // setters
+  // setters ORIGEM
   setPaisOrigem: (v: string) => void;
   setRegiaoOrigem: (v: string) => void;
   setEstadoOrigem: (v: string) => void;
   setCidadeOrigem: (v: string) => void;
+
+  // setters DESTINO
+  setPaisDestino: (v: string) => void;
+  setRegiaoDestino: (v: string) => void;
+  setEstadoDestino: (v: string) => void;
+  setCidadeDestino: (v: string) => void;
+
+  // setters comuns
   setFiltroVeiculos: (v: string[]) => void;
   setFiltroCarrocerias: (v: string[]) => void;
   setFiltroTipoCarga: (v: "todos" | "completa" | "complemento") => void;
@@ -242,11 +259,27 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
 
   const {
     visible, onClose,
-    estados, regioes, cidadesOrigem,
+    estados, regioes, cidadesOrigem, cidadesDestino,
+
+    // ORIGEM
     paisOrigem, regiaoOrigem, estadoOrigem, cidadeOrigem,
+
+    // DESTINO
+    paisDestino, regiaoDestino, estadoDestino, cidadeDestino,
+
+    // comuns
     filtroVeiculos, filtroCarrocerias, filtroTipoCarga, raioKm,
+
+    // setters ORIGEM
     setPaisOrigem, setRegiaoOrigem, setEstadoOrigem, setCidadeOrigem,
+
+    // setters DESTINO
+    setPaisDestino, setRegiaoDestino, setEstadoDestino, setCidadeDestino,
+
+    // setters comuns
     setFiltroVeiculos, setFiltroCarrocerias, setFiltroTipoCarga, setRaioKm,
+
+    // ações
     onBuscar, onLimpar,
   } = props;
 
@@ -282,16 +315,19 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
 
             <ScrollView
               style={{ maxHeight: "100%" }}
-              contentContainerStyle={{ paddingBottom: 12, gap: 10 }}
+              contentContainerStyle={{ paddingBottom: 12, gap: 14 }}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
-              {/* País */}
-              <Text style={styles.sectionTitle}>Origem</Text>
+              {/* ================== ORIGEM ================== */}
+              <Text style={styles.groupTitle}>Origem</Text>
+
+              {/* País (origem) */}
+              <Text style={styles.sectionTitle}>País</Text>
               <View style={styles.wrap}>
                 {PAISES.map((p) => (
                   <Tag
-                    key={p}
+                    key={`origem-${p}`}
                     text={p}
                     selected={paisOrigem === p}
                     onPress={() => {
@@ -306,14 +342,14 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
                 ))}
               </View>
 
-              {/* Região */}
+              {/* Região (origem) */}
               {paisOrigem === "Brasil" && (
                 <>
                   <Text style={styles.sectionTitle}>Região</Text>
                   <View style={styles.wrap}>
                     {regioes.map((r) => (
                       <Tag
-                        key={r}
+                        key={`origem-reg-${r}`}
                         text={r}
                         selected={regiaoOrigem === r}
                         onPress={() => {
@@ -328,7 +364,7 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
                 </>
               )}
 
-              {/* Estados (só quando região escolhida) */}
+              {/* Estado (origem) */}
               {paisOrigem === "Brasil" && !!regiaoOrigem && (
                 <>
                   <Text style={styles.sectionTitle}>Estado</Text>
@@ -338,7 +374,7 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
                       .sort((a, b) => a.sigla.localeCompare(b.sigla))
                       .map((e) => (
                         <Tag
-                          key={e.sigla}
+                          key={`origem-uf-${e.sigla}`}
                           text={e.sigla}
                           selected={estadoOrigem === e.sigla}
                           onPress={() => {
@@ -352,7 +388,7 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
                 </>
               )}
 
-              {/* Cidade da UF */}
+              {/* Cidade (origem) */}
               {paisOrigem === "Brasil" && !!estadoOrigem && (
                 <>
                   <Text style={styles.sectionTitle}>Cidade</Text>
@@ -363,14 +399,101 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
                     >
                       <Picker.Item label="Selecione a cidade" value="" />
                       {cidadesOrigem.map((c) => (
-                        <Picker.Item key={c} label={c} value={c} />
+                        <Picker.Item key={`origem-city-${c}`} label={c} value={c} />
                       ))}
                     </Picker>
                   </View>
                 </>
               )}
 
-              {/* Veículos (multiselect compacta) */}
+              {/* ================== DESTINO ================== */}
+              <Text style={[styles.groupTitle, { marginTop: 8 }]}>Destino</Text>
+
+              {/* País (destino) */}
+              <Text style={styles.sectionTitle}>País</Text>
+              <View style={styles.wrap}>
+                {PAISES.map((p) => (
+                  <Tag
+                    key={`destino-${p}`}
+                    text={p}
+                    selected={paisDestino === p}
+                    onPress={() => {
+                      setPaisDestino(p);
+                      if (p !== "Brasil") {
+                        setRegiaoDestino("");
+                        setEstadoDestino("");
+                        setCidadeDestino("");
+                      }
+                    }}
+                  />
+                ))}
+              </View>
+
+              {/* Região (destino) */}
+              {paisDestino === "Brasil" && (
+                <>
+                  <Text style={styles.sectionTitle}>Região</Text>
+                  <View style={styles.wrap}>
+                    {regioes.map((r) => (
+                      <Tag
+                        key={`destino-reg-${r}`}
+                        text={r}
+                        selected={regiaoDestino === r}
+                        onPress={() => {
+                          const next = regiaoDestino === r ? "" : r;
+                          setRegiaoDestino(next);
+                          setEstadoDestino("");
+                          setCidadeDestino("");
+                        }}
+                      />
+                    ))}
+                  </View>
+                </>
+              )}
+
+              {/* Estado (destino) */}
+              {paisDestino === "Brasil" && !!regiaoDestino && (
+                <>
+                  <Text style={styles.sectionTitle}>Estado</Text>
+                  <View style={styles.wrap}>
+                    {estados
+                      .filter((e) => e.regiao.nome === regiaoDestino)
+                      .sort((a, b) => a.sigla.localeCompare(b.sigla))
+                      .map((e) => (
+                        <Tag
+                          key={`destino-uf-${e.sigla}`}
+                          text={e.sigla}
+                          selected={estadoDestino === e.sigla}
+                          onPress={() => {
+                            const next = estadoDestino === e.sigla ? "" : e.sigla;
+                            setEstadoDestino(next);
+                            setCidadeDestino("");
+                          }}
+                        />
+                      ))}
+                  </View>
+                </>
+              )}
+
+              {/* Cidade (destino) */}
+              {paisDestino === "Brasil" && !!estadoDestino && (
+                <>
+                  <Text style={styles.sectionTitle}>Cidade</Text>
+                  <View style={styles.picker}>
+                    <Picker
+                      selectedValue={cidadeDestino || ""}
+                      onValueChange={(v) => setCidadeDestino(String(v))}
+                    >
+                      <Picker.Item label="Selecione a cidade" value="" />
+                      {cidadesDestino.map((c) => (
+                        <Picker.Item key={`destino-city-${c}`} label={c} value={c} />
+                      ))}
+                    </Picker>
+                  </View>
+                </>
+              )}
+
+              {/* Veículos (multiselect) */}
               <MultiSelectDropdown
                 label="Veículos"
                 options={VEICULOS}
@@ -378,7 +501,7 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
                 onToggle={(val) => toggle(filtroVeiculos, setFiltroVeiculos, val)}
               />
 
-              {/* Carrocerias (multiselect compacta) */}
+              {/* Carrocerias (multiselect) */}
               <MultiSelectDropdown
                 label="Carrocerias"
                 options={CARROCERIAS}
@@ -394,7 +517,7 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
                 <Tag text="complemento" selected={filtroTipoCarga === "complemento"} onPress={() => setFiltroTipoCarga("complemento")} />
               </View>
 
-              {/* Raio */}
+              {/* Raio (a partir da ORIGEM) */}
               <Text style={styles.sectionTitle}>Raio (a partir da origem)</Text>
               <View style={styles.picker}>
                 <Picker
@@ -410,7 +533,7 @@ const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) 
               </View>
               {!!raioKm && (
                 <Text style={styles.helper}>
-                  Dica: selecione UF e cidade (ou digite “Cidade, UF”) para a distância ficar precisa.
+                  Dica: selecione UF e cidade (ou digite “Cidade, UF” na busca) para a distância ficar precisa.
                 </Text>
               )}
             </ScrollView>
@@ -450,28 +573,33 @@ export default function FretesScreen() {
   const [fretes, setFretes] = useState<Frete[]>([]);
   const [estados, setEstados] = useState<EstadoIBGE[]>([]);
   const [cidadesOrigem, setCidadesOrigem] = useState<string[]>([]);
+  const [cidadesDestino, setCidadesDestino] = useState<string[]>([]);
 
-  // Busca (digitação x aplicado)
+  // Busca livre (origem)
   const [inputBusca, setInputBusca] = useState("");
   const [buscaAplicada, setBuscaAplicada] = useState("");
 
-  // Filtros estruturados (modal)
+  // Filtros estruturados — ORIGEM
   const [paisOrigem, setPaisOrigem] = useState<string>("Brasil");
   const [regiaoOrigem, setRegiaoOrigem] = useState<string>("");
   const [estadoOrigem, setEstadoOrigem] = useState<string>("");
   const [cidadeOrigem, setCidadeOrigem] = useState<string>("");
-  const [cidadeDestino] = useState<string>("");
 
+  // Filtros estruturados — DESTINO
+  const [paisDestino, setPaisDestino] = useState<string>("Brasil");
+  const [regiaoDestino, setRegiaoDestino] = useState<string>("");
+  const [estadoDestino, setEstadoDestino] = useState<string>("");
+  const [cidadeDestino, setCidadeDestino] = useState<string>("");
+
+  // Comuns
   const [filtroVeiculos, setFiltroVeiculos] = useState<string[]>([]);
   const [filtroCarrocerias, setFiltroCarrocerias] = useState<string[]>([]);
   const [filtroTipoCarga, setFiltroTipoCarga] = useState<"todos" | "completa" | "complemento">("todos");
   const [raioKm, setRaioKm] = useState<number | null>(null);
   const [coordsOrigem, setCoordsOrigem] = useState<{ lat: number; lon: number } | null>(null);
 
-  // UI state
+  // UI
   const [filtersSheetOpen, setFiltersSheetOpen] = useState(false);
-
-  // Prefetch de coordenadas (raio)
   const [prefetchingRaio, setPrefetchingRaio] = useState(false);
   const [prefetchTick, setPrefetchTick] = useState(0);
 
@@ -524,7 +652,7 @@ export default function FretesScreen() {
   // Regiões únicas
   const regioes = useMemo(() => Array.from(new Set(estados.map((e) => e.regiao.nome))).sort(), [estados]);
 
-  // Carrega cidades da UF
+  // Carrega cidades da UF — ORIGEM
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -546,6 +674,28 @@ export default function FretesScreen() {
     return () => { cancelled = true; };
   }, [paisOrigem, estadoOrigem]);
 
+  // Carrega cidades da UF — DESTINO
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (paisDestino === "Brasil" && estadoDestino) {
+        try {
+          const res = await fetchWithTimeout(
+            `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${estadoDestino}/municipios`, {}, 8000
+          );
+          const data: MunicipioIBGE[] = await res.json();
+          if (!cancelled) setCidadesDestino(data.map((m) => m.nome));
+        } catch {
+          if (!cancelled) setCidadesDestino([]);
+        }
+      } else {
+        setCidadesDestino([]);
+      }
+      setCidadeDestino("");
+    })();
+    return () => { cancelled = true; };
+  }, [paisDestino, estadoDestino]);
+
   // Coordenadas da ORIGEM para o raio (só quando houver UF)
   useEffect(() => {
     (async () => {
@@ -562,7 +712,7 @@ export default function FretesScreen() {
     })();
   }, [paisOrigem, estadoOrigem, cidadeOrigem, buscaAplicada, raioKm]);
 
-  // Filtro base (sem travar cidade quando há raio)
+  // Filtro base (aplicando ORIGEM + DESTINO + filtros comuns)
   const fretesFiltradosBase = useMemo(() => {
     const parsed = parseBusca(buscaAplicada); // "Cidade" ou "Cidade, UF"
     const cidadeBusca = parsed.cidade || cidadeOrigem;
@@ -570,18 +720,16 @@ export default function FretesScreen() {
 
     return fretes.filter((f) => {
       const [cidadeC, estadoC, paisC] = (f.cidadeColeta || "").split(" - ").map((s) => (s || "").trim());
-      const [cidadeE] = (f.cidadeEntrega || "").split(" - ").map((s) => (s || "").trim());
+      const [cidadeE, estadoE, paisE] = (f.cidadeEntrega || "").split(" - ").map((s) => (s || "").trim());
 
-      // País de origem
+      // ===== ORIGEM =====
       if (paisOrigem && paisC && paisC !== paisOrigem) return false;
 
-      // Região de origem (se Brasil)
       if (paisOrigem === "Brasil" && regiaoOrigem) {
         const estObj = estados.find((e) => e.sigla === estadoC || toLowerNoAccent(e.nome) === toLowerNoAccent(estadoC || ""));
         if (estObj?.regiao.nome !== regiaoOrigem) return false;
       }
 
-      // UF de origem
       if (paisOrigem === "Brasil" && ufBusca) {
         const ok =
           estadoC === ufBusca ||
@@ -589,24 +737,33 @@ export default function FretesScreen() {
         if (!ok) return false;
       }
 
-      // Cidade de origem — **somente se NÃO houver raio**
       if (!raioKm && cidadeBusca) {
         if (toLowerNoAccent(cidadeC || "") !== toLowerNoAccent(cidadeBusca)) return false;
       }
 
-      // (Opcional) cidade destino — mantido igual
-      if (cidadeDestino) {
-        const cidadeTxt = cidadeDestino.split("-")[0]?.trim() || "";
-        if (toLowerNoAccent(cidadeE || "") !== toLowerNoAccent(cidadeTxt)) return false;
+      // ===== DESTINO =====
+      if (paisDestino && paisE && paisE !== paisDestino) return false;
+
+      if (paisDestino === "Brasil" && regiaoDestino) {
+        const estObjDest = estados.find((e) => e.sigla === estadoE || toLowerNoAccent(e.nome) === toLowerNoAccent(estadoE || ""));
+        if (estObjDest?.regiao.nome !== regiaoDestino) return false;
       }
 
-      // Veículos
-      if (filtroVeiculos.length && !filtroVeiculos.some((v) => (f.veiculos || []).includes(v))) return false;
+      if (paisDestino === "Brasil" && estadoDestino) {
+        const okDest =
+          estadoE === estadoDestino ||
+          toLowerNoAccent(estados.find((e) => e.sigla === estadoDestino)?.nome || "") === toLowerNoAccent(estadoE || "");
+        if (!okDest) return false;
+      }
 
-      // Carrocerias
+      if (paisDestino === "Brasil" && cidadeDestino) {
+        if (toLowerNoAccent(cidadeE || "") !== toLowerNoAccent(cidadeDestino)) return false;
+      }
+
+      // ===== Comuns =====
+      if (filtroVeiculos.length && !filtroVeiculos.some((v) => (f.veiculos || []).includes(v))) return false;
       if (filtroCarrocerias.length && !filtroCarrocerias.some((c) => (f.carrocerias || []).includes(c))) return false;
 
-      // Tipo de carga
       if (filtroTipoCarga !== "todos") {
         const tipo = (f.tipoCarga || "").toLowerCase();
         if (tipo !== filtroTipoCarga) return false;
@@ -615,7 +772,15 @@ export default function FretesScreen() {
       return true;
     });
   }, [
-    fretes, buscaAplicada, paisOrigem, regiaoOrigem, estadoOrigem, cidadeOrigem, cidadeDestino,
+    fretes,
+
+    // origem
+    buscaAplicada, paisOrigem, regiaoOrigem, estadoOrigem, cidadeOrigem,
+
+    // destino
+    paisDestino, regiaoDestino, estadoDestino, cidadeDestino,
+
+    // comuns
     filtroVeiculos, filtroCarrocerias, filtroTipoCarga, estados, raioKm
   ]);
 
@@ -683,14 +848,25 @@ export default function FretesScreen() {
   const limparTudo = useCallback(() => {
     setInputBusca("");
     setBuscaAplicada("");
+
+    // origem
     setPaisOrigem("Brasil");
     setRegiaoOrigem("");
     setEstadoOrigem("");
     setCidadeOrigem("");
+
+    // destino
+    setPaisDestino("Brasil");
+    setRegiaoDestino("");
+    setEstadoDestino("");
+    setCidadeDestino("");
+
+    // comuns
     setFiltroVeiculos([]);
     setFiltroCarrocerias([]);
     setFiltroTipoCarga("todos");
     setRaioKm(null);
+
     setFiltersSheetOpen(false);
   }, []);
 
@@ -765,7 +941,7 @@ export default function FretesScreen() {
     <View style={{ gap: 12, paddingTop: 8, paddingBottom: 4 }}>
       <View style={styles.searchCard}>
         <TextInput
-          placeholder="Cidade ou Cidade, UF (ex.: Porto Alegre, RS)"
+          placeholder="Origem: Cidade ou Cidade, UF (ex.: Porto Alegre, RS)"
           placeholderTextColor="#9ca3af"
           value={inputBusca}
           onChangeText={setInputBusca}
@@ -795,14 +971,12 @@ export default function FretesScreen() {
   /* ===== filtros ativos? mostrar chip “limpar” ===== */
   const hasActiveFilters =
     (buscaAplicada?.length ?? 0) > 0 ||
-    paisOrigem !== "Brasil" ||
-    !!regiaoOrigem ||
-    !!estadoOrigem ||
-    !!cidadeOrigem ||
-    !!filtroVeiculos.length ||
-    !!filtroCarrocerias.length ||
-    filtroTipoCarga !== "todos" ||
-    !!raioKm;
+    // origem
+    paisOrigem !== "Brasil" || !!regiaoOrigem || !!estadoOrigem || !!cidadeOrigem ||
+    // destino
+    paisDestino !== "Brasil" || !!regiaoDestino || !!estadoDestino || !!cidadeDestino ||
+    // comuns
+    !!filtroVeiculos.length || !!filtroCarrocerias.length || filtroTipoCarga !== "todos" || !!raioKm;
 
   /* =============== UI =============== */
   if (loading) {
@@ -851,18 +1025,31 @@ export default function FretesScreen() {
         estados={estados}
         regioes={regioes}
         cidadesOrigem={cidadesOrigem}
+        cidadesDestino={cidadesDestino}
+        // origem
         paisOrigem={paisOrigem}
         regiaoOrigem={regiaoOrigem}
         estadoOrigem={estadoOrigem}
         cidadeOrigem={cidadeOrigem}
+        // destino
+        paisDestino={paisDestino}
+        regiaoDestino={regiaoDestino}
+        estadoDestino={estadoDestino}
+        cidadeDestino={cidadeDestino}
+        // comuns
         filtroVeiculos={filtroVeiculos}
         filtroCarrocerias={filtroCarrocerias}
         filtroTipoCarga={filtroTipoCarga}
         raioKm={raioKm}
+        // setters
         setPaisOrigem={setPaisOrigem}
         setRegiaoOrigem={setRegiaoOrigem}
         setEstadoOrigem={setEstadoOrigem}
         setCidadeOrigem={setCidadeOrigem}
+        setPaisDestino={setPaisDestino}
+        setRegiaoDestino={setRegiaoDestino}
+        setEstadoDestino={setEstadoDestino}
+        setCidadeDestino={setCidadeDestino}
         setFiltroVeiculos={setFiltroVeiculos}
         setFiltroCarrocerias={setFiltroCarrocerias}
         setFiltroTipoCarga={setFiltroTipoCarga}
@@ -894,9 +1081,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
   },
-  
   helper: { color: "#6b7280", fontSize: 12, marginTop: 6 },
-
   btnPrimaryText: { color: "#fff", fontWeight: "800" },
   btnSecondary: {
     backgroundColor: "#e5e7eb",
@@ -908,7 +1093,6 @@ const styles = StyleSheet.create({
   btnSecondaryText: { color: "#111827", fontWeight: "800" },
 
   safe: { flex: 1, backgroundColor: "#f9fafb" },
-
   center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#f9fafb" },
 
   alert: { margin: 12, padding: 10, backgroundColor: "#fee2e2", borderColor: "#fecaca", borderWidth: 1, borderRadius: 10 },
@@ -1031,6 +1215,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -2 },
   },
   sheetHandle: { alignSelf: "center", width: 48, height: 4, borderRadius: 999, backgroundColor: "#e5e7eb", marginBottom: 6 },
+
+  groupTitle: { fontWeight: "900", color: "#111827", fontSize: 16 },
   sectionTitle: { fontWeight: "800", color: "#111827", marginTop: 2, marginBottom: 4 },
 
   // Linhas cidade
