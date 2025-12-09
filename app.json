@@ -3,14 +3,14 @@
     "name": "Vou Carregar",
     "slug": "motorista-fretes",
 
-    "version": "1.0.7",              
+    "version": "1.0.8",
     "icon": "./assets/images/icon.png",
 
     "scheme": "voucarregar",
 
     "android": {
       "package": "br.voucarregar.motoristafretes",
-      "versionCode": 8,               
+      "versionCode": 9,
       "icon": "./assets/images/icon.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
@@ -26,14 +26,20 @@
         {
           "action": "VIEW",
           "category": ["BROWSABLE", "DEFAULT"],
-          "data": [{ "scheme": "voucarregar" }]
+          "data": [
+            { "scheme": "voucarregar" }
+          ]
         },
         {
           "autoVerify": true,
           "action": "VIEW",
           "category": ["BROWSABLE", "DEFAULT"],
           "data": [
-            { "scheme": "https", "host": "app.voucarregar.com.br", "pathPrefix": "/fretes" }
+            {
+              "scheme": "https",
+              "host": "app.voucarregar.com.br",
+              "pathPrefix": "/fretes"
+            }
           ]
         }
       ]
@@ -47,20 +53,30 @@
     "ios": {
       "bundleIdentifier": "br.voucarregar.motoristafretes",
       "supportsTablet": true,
-      "buildNumber": "8",
+      "buildNumber": "9",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Usamos o Face ID para você entrar rapidamente no app.",
         "ITSAppUsesNonExemptEncryption": false,
-        "LSApplicationQueriesSchemes": ["whatsapp", "whatsapp-business", "wa"]  
-      }
+        "LSApplicationQueriesSchemes": [
+          "whatsapp",
+          "whatsapp-business",
+          "wa"
+        ]
+      },
+      "associatedDomains": [
+        "applinks:app.voucarregar.com.br"
+      ]
     },
 
-
-    "updates": { "url": "https://u.expo.dev/fe5fc4e2-2c05-4624-957b-611c19613195" },
-    "runtimeVersion": { "policy": "appVersion" },
+    "updates": {
+      "url": "https://u.expo.dev/fe5fc4e2-2c05-4624-957b-611c19613195"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
 
     "plugins": [
-      "./plugins/with-android-queries.js",   
+      "./plugins/with-android-queries.js",
       "expo-router",
       [
         "expo-splash-screen",
@@ -77,7 +93,9 @@
 
     "owner": "fcomatcas",
     "extra": {
-      "eas": { "projectId": "fe5fc4e2-2c05-4624-957b-611c19613195" }
+      "eas": {
+        "projectId": "fe5fc4e2-2c05-4624-957b-611c19613195"
+      }
     }
   }
 }
