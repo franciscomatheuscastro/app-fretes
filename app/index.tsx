@@ -1,7 +1,13 @@
-// app/index.tsx
 import * as LocalAuthentication from "expo-local-authentication";
-import { useRouter, type Href } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import {
+  useRouter,
+  type Href,
+} from "expo-router";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -15,15 +21,41 @@ import {
   View,
 } from "react-native";
 import "react-native-get-random-values";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { v4 as uuidv4 } from "uuid";
-import { registerPushTokenOnBackend } from "../backend/lib/push";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import {
+  v4 as uuidv4,
+} from "uuid";
+
+import {
+  registerPushTokenOnBackend,
+} from "../backend/lib/push";
+
 import * as Storage from "../backend/lib/storage";
 
-const API_BASE = "https://app.voucarregar.com.br";
-const FRETES_ROUTE: Href = "/(tabs)/fretes";
-const GATE_CHECK_URL = `${API_BASE}/api/mobile/gate/check`;
-const OFFLINE_GRACE_DAYS = 3; // tolerância offline após última validação OK
+/* ========================================================= */
+/* CONFIGURAÇÃO */
+/* ========================================================= */
+
+const API_BASE = "https://www.meufreteiro.com";
+
+const FRETES_ROUTE: Href =
+  "/(tabs)/fretes";
+
+const GATE_CHECK_URL =
+  `${API_BASE}/api/mobile/gate/check`;
+
+const OFFLINE_GRACE_DAYS =
+  3;
+
+const INPUT_HEIGHT =
+  48;
+
+/* ========================================================= */
+/* TIPOS */
+/* ========================================================= */
 
 type GateCheckResponse = {
   ok: boolean;
@@ -33,633 +65,2005 @@ type GateCheckResponse = {
 };
 
 type LoginResponse = {
-  token: string;
-  refreshToken?: string;
-  user?: { id?: string | number; role?: string; nome?: string };
+  token?: string;
+
+  user?: {
+    id?: string | number;
+    role?: string;
+    nome?: string;
+  };
+
   erro?: string;
+  error?: string;
   message?: string;
 };
 
-const INPUT_HEIGHT = 48;
+/* ========================================================= */
+/* STORAGE */
+/* ========================================================= */
+
 const STORAGE_KEYS = {
-  deviceId: "global_device_id",
-  lastGateOkAt: "global_gate_last_ok_at",
+  deviceId:
+    "global_device_id",
+
+  lastGateOkAt:
+    "global_gate_last_ok_at",
+
+  authToken:
+    "authToken",
+
+  userRole:
+    "userRole",
+
+  userId:
+    "userId",
+
+  biometricEnabled:
+    "biometricEnabled",
+
+  biometricCpf:
+    "bio_cpf",
+
+  biometricPassword:
+    "bio_pw",
 };
 
-function withinDays(iso: string | null, days: number): boolean {
-  if (!iso) return false;
-  const last = new Date(iso).getTime();
-  if (Number.isNaN(last)) return false;
-  const now = Date.now();
-  return now - last <= days * 24 * 60 * 60 * 1000;
+/* ========================================================= */
+/* HELPERS */
+/* ========================================================= */
+
+function withinDays(
+  iso: string | null,
+  days: number
+): boolean {
+  if (!iso) {
+    return false;
+  }
+
+  const last =
+    new Date(
+      iso
+    ).getTime();
+
+  if (
+    Number.isNaN(
+      last
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    Date.now() -
+      last <=
+    days *
+      24 *
+      60 *
+      60 *
+      1000
+  );
 }
 
-export default function CaminhoneiroLogin() {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
+function formatarCpf(
+  valor: string
+) {
+  return valor
+    .replace(
+      /\D/g,
+      ""
+    )
+    .replace(
+      /(\d{3})(\d)/,
+      "$1.$2"
+    )
+    .replace(
+      /(\d{3})(\d)/,
+      "$1.$2"
+    )
+    .replace(
+      /(\d{3})(\d{1,2})$/,
+      "$1-$2"
+    )
+    .slice(
+      0,
+      14
+    );
+}
 
-  const [cpf, setCpf] = useState("");
-  const [senha, setSenha] = useState("");
-  const [erro, setErro] = useState("");
-  const [mostrarSenha, setMostrarSenha] = useState(false);
+/* ========================================================= */
+/* COMPONENTE */
+/* ========================================================= */
 
-  // estados de boot / carregamento
-  const [booting, setBooting] = useState(true); // controla “piscar” da tela
-  const [loading, setLoading] = useState(false);
+export default function FreteiroLogin() {
+  const router =
+    useRouter();
 
-  // biometria
-  const [bioAvailable, setBioAvailable] = useState(false);
-  const [bioEnabled, setBioEnabled] = useState(false);
-  const [bioLoading, setBioLoading] = useState(false);
-  const triedBioOnce = useRef(false);
+  const insets =
+    useSafeAreaInsets();
 
-  // kill switch global
-  const [gateChecking, setGateChecking] = useState(true);
-  const [gateActive, setGateActive] = useState<boolean>(false);
-  const [gateMessage, setGateMessage] = useState<string>("");
+  /* ======================================================= */
+  /* LOGIN */
+  /* ======================================================= */
 
-  const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [
+    cpf,
+    setCpf,
+  ] =
+    useState("");
 
-  // --- Boot inicial
-  useEffect(() => {
-    (async () => {
-      // 1) Garante deviceId
-      let did = await Storage.getItem(STORAGE_KEYS.deviceId);
-      if (!did) {
-        did = uuidv4();
-        await Storage.setItem(STORAGE_KEYS.deviceId, did);
-      }
-      setDeviceId(did);
+  const [
+    senha,
+    setSenha,
+  ] =
+    useState("");
 
-      // 2) Valida gate
-      const allowed = await checkGate({ requireOnlineIfNeverValidated: true });
-      if (!allowed) {
-        setBooting(false);
-        return;
-      }
+  const [
+    erro,
+    setErro,
+  ] =
+    useState("");
 
-      // 3) Tenta auto-login silencioso (sem pedir nada ao usuário)
-      const autoOk = await tryAutoLoginSilencioso();
-      if (!autoOk) {
-        // Prepara biometria para próxima tentativa (sem bloquear UI)
-        const hasHardware = await LocalAuthentication.hasHardwareAsync();
-        const enrolled = await LocalAuthentication.isEnrolledAsync();
-        setBioAvailable(Boolean(hasHardware && enrolled));
-        const flag = await Storage.getItem("biometricEnabled");
-        setBioEnabled(flag === "1");
-      }
-      setBooting(false);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [
+    mostrarSenha,
+    setMostrarSenha,
+  ] =
+    useState(false);
 
-  // Revalida gate ao voltar para foreground (mantém sessão fluída)
-  useEffect(() => {
-    const sub = AppState.addEventListener("change", async (state) => {
-      if (state === "active") {
-        const allowed = await checkGate();
-        if (allowed) {
-          // se já há token e role, garante que permanece logado
-          const token = await Storage.getItem("authToken");
-          const role = await Storage.getItem("userRole");
-          if (token && role === "caminhoneiro") {
-            // opcionalmente, poderíamos tentar refresh em background
+  const [
+    loading,
+    setLoading,
+  ] =
+    useState(false);
+
+  /* ======================================================= */
+  /* BOOT */
+  /* ======================================================= */
+
+  const [
+    booting,
+    setBooting,
+  ] =
+    useState(true);
+
+  /* ======================================================= */
+  /* BIOMETRIA */
+  /* ======================================================= */
+
+  const [
+    bioAvailable,
+    setBioAvailable,
+  ] =
+    useState(false);
+
+  const [
+    bioEnabled,
+    setBioEnabled,
+  ] =
+    useState(false);
+
+  const [
+    bioLoading,
+    setBioLoading,
+  ] =
+    useState(false);
+
+  const triedBioOnce =
+    useRef(false);
+
+  /* ======================================================= */
+  /* GLOBAL GATE */
+  /* ======================================================= */
+
+  const [
+    gateChecking,
+    setGateChecking,
+  ] =
+    useState(true);
+
+  const [
+    gateActive,
+    setGateActive,
+  ] =
+    useState(false);
+
+  const [
+    gateMessage,
+    setGateMessage,
+  ] =
+    useState("");
+
+  /* ======================================================= */
+  /* BOOT INICIAL */
+  /* ======================================================= */
+
+  useEffect(
+    () => {
+      void (
+        async () => {
+          /*
+           * Mantemos um identificador local
+           * do dispositivo.
+           */
+          let deviceId =
+            await Storage.getItem(
+              STORAGE_KEYS.deviceId
+            );
+
+          if (!deviceId) {
+            deviceId =
+              uuidv4();
+
+            await Storage.setItem(
+              STORAGE_KEYS.deviceId,
+              deviceId
+            );
+          }
+
+          /*
+           * Verifica se o aplicativo
+           * está liberado.
+           */
+          const allowed =
+            await checkGate({
+              requireOnlineIfNeverValidated:
+                true,
+            });
+
+          if (!allowed) {
+            setBooting(
+              false
+            );
+
             return;
           }
-          // se perdeu sessão, tenta refresh silencioso
-          await tryAutoLoginSilencioso();
+
+          /*
+           * Se existe sessão local,
+           * entra diretamente.
+           */
+          const autoOk =
+            await tryAutoLoginSilencioso();
+
+          if (!autoOk) {
+            await prepararBiometria();
+          }
+
+          setBooting(
+            false
+          );
         }
-      }
-    });
-    return () => sub.remove();
-  }, []);
+      )();
 
-  // --------- Gate ----------
-  async function checkGate(opts?: { requireOnlineIfNeverValidated?: boolean }) {
-    const requireOnlineIfNeverValidated = opts?.requireOnlineIfNeverValidated ?? false;
-    setGateChecking(true);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    []
+  );
+
+  /* ======================================================= */
+  /* RETORNO AO FOREGROUND */
+  /* ======================================================= */
+
+  useEffect(
+    () => {
+      const sub =
+        AppState.addEventListener(
+          "change",
+          async (
+            state
+          ) => {
+            if (
+              state !==
+              "active"
+            ) {
+              return;
+            }
+
+            const allowed =
+              await checkGate();
+
+            if (!allowed) {
+              return;
+            }
+
+            const token =
+              await Storage.getItem(
+                STORAGE_KEYS.authToken
+              );
+
+            const role =
+              await Storage.getItem(
+                STORAGE_KEYS.userRole
+              );
+
+            if (
+              token &&
+              role ===
+                "caminhoneiro"
+            ) {
+              return;
+            }
+
+            await prepararBiometria();
+          }
+        );
+
+      return () =>
+        sub.remove();
+
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    []
+  );
+
+  /* ======================================================= */
+  /* PREPARAR BIOMETRIA */
+  /* ======================================================= */
+
+  async function prepararBiometria() {
     try {
-      const lastOkIso = (await Storage.getItem(STORAGE_KEYS.lastGateOkAt)) || null;
-      const neverValidated = !lastOkIso;
+      const [
+        hasHardware,
+        enrolled,
+        flag,
+      ] =
+        await Promise.all([
+          LocalAuthentication.hasHardwareAsync(),
 
-      let ok = false;
-      let active = false;
-      let message = "";
+          LocalAuthentication.isEnrolledAsync(),
+
+          Storage.getItem(
+            STORAGE_KEYS.biometricEnabled
+          ),
+        ]);
+
+      setBioAvailable(
+        Boolean(
+          hasHardware &&
+            enrolled
+        )
+      );
+
+      setBioEnabled(
+        flag ===
+          "1"
+      );
+    } catch {
+      setBioAvailable(
+        false
+      );
+
+      setBioEnabled(
+        false
+      );
+    }
+  }
+
+  /* ======================================================= */
+  /* GLOBAL GATE */
+  /* ======================================================= */
+
+  async function checkGate(
+    opts?: {
+      requireOnlineIfNeverValidated?: boolean;
+    }
+  ) {
+    const requireOnlineIfNeverValidated =
+      opts
+        ?.requireOnlineIfNeverValidated ??
+      false;
+
+    setGateChecking(
+      true
+    );
+
+    try {
+      const lastOkIso =
+        (await Storage.getItem(
+          STORAGE_KEYS.lastGateOkAt
+        )) ||
+        null;
+
+      const neverValidated =
+        !lastOkIso;
+
+      let ok =
+        false;
+
+      let active =
+        false;
+
+      let message =
+        "";
 
       try {
-        const res = await fetch(GATE_CHECK_URL, { method: "POST" });
-        const data = (await res.json()) as GateCheckResponse;
-        ok = Boolean(data?.ok);
-        active = Boolean(data?.active);
-        message = (data?.message ?? "") || (active ? "" : "Aplicativo bloqueado.");
+        const res =
+          await fetch(
+            GATE_CHECK_URL,
+            {
+              method:
+                "POST",
+            }
+          );
+
+        const data =
+          (await res.json()) as GateCheckResponse;
+
+        ok =
+          Boolean(
+            data?.ok
+          );
+
+        active =
+          Boolean(
+            data?.active
+          );
+
+        message =
+          data?.message ??
+          "";
+
+        if (
+          !active &&
+          !message
+        ) {
+          message =
+            "Aplicativo temporariamente indisponível.";
+        }
       } catch {
-        // offline — decide pelo cache
+        /*
+         * Sem internet:
+         * utiliza a tolerância local.
+         */
       }
 
       if (ok) {
-        setGateActive(active);
-        setGateMessage(message);
-        setGateChecking(false);
+        setGateActive(
+          active
+        );
+
+        setGateMessage(
+          message
+        );
+
         if (active) {
-          await Storage.setItem(STORAGE_KEYS.lastGateOkAt, new Date().toISOString());
+          await Storage.setItem(
+            STORAGE_KEYS.lastGateOkAt,
+            new Date().toISOString()
+          );
         }
+
         return active;
       }
 
-      // offline: política de grace
-      if (neverValidated && requireOnlineIfNeverValidated) {
-        setGateActive(false);
-        setGateMessage("Sem conexão para validar. Tente novamente com internet.");
-        setGateChecking(false);
+      if (
+        neverValidated &&
+        requireOnlineIfNeverValidated
+      ) {
+        setGateActive(
+          false
+        );
+
+        setGateMessage(
+          "Sem conexão para validar. Conecte-se à internet e tente novamente."
+        );
+
         return false;
       }
 
-      const allowByGrace = withinDays(lastOkIso, OFFLINE_GRACE_DAYS);
-      setGateActive(allowByGrace);
-      setGateMessage(
-        allowByGrace ? "" : "Não foi possível validar. Conecte-se à internet para continuar."
+      const allowByGrace =
+        withinDays(
+          lastOkIso,
+          OFFLINE_GRACE_DAYS
+        );
+
+      setGateActive(
+        allowByGrace
       );
-      setGateChecking(false);
+
+      setGateMessage(
+        allowByGrace
+          ? ""
+          : "Não foi possível validar. Conecte-se à internet para continuar."
+      );
+
       return allowByGrace;
     } catch {
-      setGateActive(false);
-      setGateMessage("Erro ao validar o aplicativo.");
-      setGateChecking(false);
+      setGateActive(
+        false
+      );
+
+      setGateMessage(
+        "Erro ao validar o aplicativo."
+      );
+
       return false;
+    } finally {
+      setGateChecking(
+        false
+      );
     }
   }
 
-  // --------- Auto-login silencioso ----------
+  /* ======================================================= */
+  /* AUTOLOGIN */
+  /* ======================================================= */
+
   async function tryAutoLoginSilencioso(): Promise<boolean> {
     try {
-      // 1) Se já há token + role, entra direto
-      const [token, role] = await Promise.all([
-        Storage.getItem("authToken"),
-        Storage.getItem("userRole"),
-      ]);
-      if (token && role === "caminhoneiro") {
-        router.replace(FRETES_ROUTE);
+      const [
+        token,
+        role,
+      ] =
+        await Promise.all([
+          Storage.getItem(
+            STORAGE_KEYS.authToken
+          ),
+
+          Storage.getItem(
+            STORAGE_KEYS.userRole
+          ),
+        ]);
+
+      /*
+       * O JWT atual possui validade própria.
+       *
+       * A validade real será confirmada pelas
+       * APIs protegidas quando utilizadas.
+       */
+      if (
+        token &&
+        role ===
+          "caminhoneiro"
+      ) {
+        router.replace(
+          FRETES_ROUTE
+        );
+
         return true;
       }
 
-      // 2) Caso tenha refreshToken, tenta refresh e entra
-      const refreshToken = await Storage.getItem("refreshToken");
-      if (refreshToken) {
-        const res = await fetch(`${API_BASE}/api/mobile/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refreshToken }),
+      /*
+       * Sem token:
+       * biometria pode fazer uma nova
+       * autenticação utilizando as credenciais
+       * previamente autorizadas pelo usuário.
+       */
+      const enabledFlag =
+        await Storage.getItem(
+          STORAGE_KEYS.biometricEnabled
+        );
+
+      const hasHardware =
+        await LocalAuthentication.hasHardwareAsync();
+
+      const enrolled =
+        await LocalAuthentication.isEnrolledAsync();
+
+      if (
+        enabledFlag ===
+          "1" &&
+        hasHardware &&
+        enrolled &&
+        !triedBioOnce.current
+      ) {
+        triedBioOnce.current =
+          true;
+
+        return await tryBiometricLogin({
+          silent:
+            true,
         });
-        const raw = await res.text().catch(() => "");
-        let data: LoginResponse | null = null;
-        try {
-          data = raw ? (JSON.parse(raw) as LoginResponse) : null;
-        } catch {}
-        if (res.ok && data?.token) {
-          await Storage.setItem("authToken", data.token);
-          await Storage.setItem("userRole", data.user?.role ?? "caminhoneiro");
-          await Storage.setItem("userId", String(data.user?.id ?? ""));
-          if (data.refreshToken) await Storage.setItem("refreshToken", data.refreshToken);
-          // registra push no backend
-          registerPushTokenOnBackend(API_BASE).catch(() => {});
-          router.replace(FRETES_ROUTE);
-          return true;
-        }
       }
 
-      // 3) Se biometria estiver habilitada, tenta silenciosamente
-      const enabledFlag = await Storage.getItem("biometricEnabled");
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const enrolled = await LocalAuthentication.isEnrolledAsync();
-      if (enabledFlag === "1" && hasHardware && enrolled && !triedBioOnce.current) {
-        triedBioOnce.current = true;
-        const ok = await tryBiometricLogin({ silent: true });
-        if (ok) return true;
-      }
-
-      // sem sessão válida
       return false;
     } catch {
       return false;
     }
   }
 
-  // --------- Login manual ----------
-  function formatarCpf(v: string) {
-    return v
-      .replace(/\D/g, "")
-      .replace(/(\d{3})(\d)/, "$1.$2")
-      .replace(/(\d{3})(\d)/, "$1.$2")
-      .replace(/(\d{3})(\d{1,2})$/, "$1-$2")
-      .slice(0, 14);
+  /* ======================================================= */
+  /* SALVAR SESSÃO */
+  /* ======================================================= */
+
+  async function salvarSessao(
+    data: LoginResponse
+  ) {
+    if (
+      !data.token ||
+      !data.user?.id ||
+      data.user.role !==
+        "caminhoneiro"
+    ) {
+      throw new Error(
+        "Sessão inválida."
+      );
+    }
+
+    await Promise.all([
+      Storage.setItem(
+        STORAGE_KEYS.authToken,
+        data.token
+      ),
+
+      Storage.setItem(
+        STORAGE_KEYS.userRole,
+        data.user.role
+      ),
+
+      Storage.setItem(
+        STORAGE_KEYS.userId,
+        String(
+          data.user.id
+        )
+      ),
+    ]);
+
+    /*
+     * Registra o dispositivo para
+     * notificações push.
+     */
+    registerPushTokenOnBackend(
+      API_BASE
+    ).catch(
+      () => {}
+    );
   }
 
+  /* ======================================================= */
+  /* LOGIN NA API */
+  /* ======================================================= */
+
+  async function fazerLogin(
+    cpfNumerico: string,
+    senhaInformada: string
+  ): Promise<LoginResponse> {
+    const res =
+      await fetch(
+        `${API_BASE}/api/mobile/login`,
+        {
+          method:
+            "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            Accept:
+              "application/json",
+          },
+
+          body:
+            JSON.stringify({
+              email:
+                cpfNumerico,
+
+              password:
+                senhaInformada,
+            }),
+        }
+      );
+
+    const raw =
+      await res
+        .text()
+        .catch(
+          () => ""
+        );
+
+    let data:
+      | LoginResponse
+      | null =
+      null;
+
+    try {
+      data =
+        raw
+          ? (JSON.parse(
+              raw
+            ) as LoginResponse)
+          : null;
+    } catch {
+      data =
+        null;
+    }
+
+    if (
+      !res.ok ||
+      !data?.token
+    ) {
+      throw new Error(
+        data?.error ||
+          data?.erro ||
+          data?.message ||
+          "CPF ou senha inválidos."
+      );
+    }
+
+    if (
+      data.user?.role !==
+      "caminhoneiro"
+    ) {
+      throw new Error(
+        "Acesso não autorizado."
+      );
+    }
+
+    return data;
+  }
+
+  /* ======================================================= */
+  /* LOGIN MANUAL */
+  /* ======================================================= */
+
   async function handleSubmit() {
-    setErro("");
+    setErro(
+      ""
+    );
+
     if (!gateActive) {
-      setErro("Aplicativo bloqueado no momento.");
+      setErro(
+        "Aplicativo bloqueado no momento."
+      );
+
       return;
     }
 
-    const cpfNumerico = (cpf ?? "").replace(/\D/g, "");
-    if (!cpfNumerico || !senha) return setErro("Preencha CPF e senha.");
-    if (cpfNumerico.length !== 11) return setErro("CPF inválido (deve ter 11 dígitos).");
+    const cpfNumerico =
+      cpf.replace(
+        /\D/g,
+        ""
+      );
 
-    const payload = { email: cpfNumerico, cpf: cpfNumerico, password: senha, senha: senha };
+    if (
+      !cpfNumerico ||
+      !senha
+    ) {
+      setErro(
+        "Preencha CPF e senha."
+      );
+
+      return;
+    }
+
+    if (
+      cpfNumerico.length !==
+      11
+    ) {
+      setErro(
+        "CPF inválido."
+      );
+
+      return;
+    }
 
     try {
-      setLoading(true);
-      const res = await fetch(`${API_BASE}/api/mobile/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(payload),
-      });
+      setLoading(
+        true
+      );
 
-      let data: LoginResponse | null = null;
-      const raw = await res.text().catch(() => "");
-      try {
-        data = raw ? (JSON.parse(raw) as LoginResponse) : null;
-      } catch {}
+      const data =
+        await fazerLogin(
+          cpfNumerico,
+          senha
+        );
 
-      if (!res.ok || !data?.token) {
-        const msg = data?.erro || data?.message || raw || `Falha no login (HTTP ${res.status})`;
-        setErro(msg);
-        return;
-      }
+      await salvarSessao(
+        data
+      );
 
-      if (data.user?.role !== "caminhoneiro") {
-        setErro("Acesso não autorizado.");
-        return;
-      }
+      /* =================================================== */
+      /* BIOMETRIA */
+      /* =================================================== */
 
-      await Storage.setItem("authToken", data.token);
-      await Storage.setItem("userRole", data.user?.role ?? "");
-      await Storage.setItem("userId", String(data.user?.id ?? ""));
-      if (data.refreshToken) await Storage.setItem("refreshToken", data.refreshToken);
+      const [
+        hasHardware,
+        enrolled,
+      ] =
+        await Promise.all([
+          LocalAuthentication.hasHardwareAsync(),
 
-      // registra push
-      registerPushTokenOnBackend(API_BASE).catch(() => {});
+          LocalAuthentication.isEnrolledAsync(),
+        ]);
 
-      // pergunta biometria apenas como comodidade (não é necessária para auto-login)
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const enrolled = await LocalAuthentication.isEnrolledAsync();
-      setBioAvailable(Boolean(hasHardware && enrolled));
-      if (hasHardware && enrolled) {
-        const flag = await Storage.getItem("biometricEnabled");
-        if (flag !== "1") {
+      setBioAvailable(
+        Boolean(
+          hasHardware &&
+            enrolled
+        )
+      );
+
+      if (
+        hasHardware &&
+        enrolled
+      ) {
+        const flag =
+          await Storage.getItem(
+            STORAGE_KEYS.biometricEnabled
+          );
+
+        if (
+          flag !==
+          "1"
+        ) {
           Alert.alert(
-            Platform.OS === "ios" ? "Ativar Face ID?" : "Ativar biometria?",
-            "Você quer entrar sem digitar senha nas próximas vezes?",
+            Platform.OS ===
+              "ios"
+              ? "Ativar Face ID?"
+              : "Ativar biometria?",
+
+            "Você quer usar a biometria para entrar mais rapidamente nas próximas vezes?",
+
             [
-              { text: "Agora não", onPress: () => router.replace(FRETES_ROUTE), style: "cancel" },
               {
-                text: "Ativar",
-                onPress: async () => {
-                  await Storage.setItem("bio_cpf", cpfNumerico);
-                  await Storage.setItem("bio_pw", senha);
-                  await Storage.setItem("biometricEnabled", "1");
-                  setBioEnabled(true);
-                  router.replace(FRETES_ROUTE);
-                },
+                text:
+                  "Agora não",
+
+                style:
+                  "cancel",
+
+                onPress:
+                  () =>
+                    router.replace(
+                      FRETES_ROUTE
+                    ),
+              },
+
+              {
+                text:
+                  "Ativar",
+
+                onPress:
+                  async () => {
+                    await Promise.all([
+                      Storage.setItem(
+                        STORAGE_KEYS.biometricCpf,
+                        cpfNumerico
+                      ),
+
+                      Storage.setItem(
+                        STORAGE_KEYS.biometricPassword,
+                        senha
+                      ),
+
+                      Storage.setItem(
+                        STORAGE_KEYS.biometricEnabled,
+                        "1"
+                      ),
+                    ]);
+
+                    setBioEnabled(
+                      true
+                    );
+
+                    router.replace(
+                      FRETES_ROUTE
+                    );
+                  },
               },
             ]
           );
+
           return;
         }
       }
 
-      router.replace(FRETES_ROUTE);
-    } catch (e) {
-      console.error(e);
-      setErro("Erro ao tentar entrar. Verifique sua conexão e tente novamente.");
+      router.replace(
+        FRETES_ROUTE
+      );
+    } catch (error) {
+      console.error(
+        error
+      );
+
+      setErro(
+        error instanceof
+          Error
+          ? error.message
+          : "Erro ao tentar entrar. Verifique sua conexão."
+      );
     } finally {
-      setLoading(false);
+      setLoading(
+        false
+      );
     }
   }
 
-  // --------- Biometria (opcional) ----------
-  async function tryBiometricLogin(opts: { silent?: boolean } = {}) {
-    const { silent } = opts;
+  /* ======================================================= */
+  /* BIOMETRIA */
+  /* ======================================================= */
+
+  async function tryBiometricLogin(
+    opts: {
+      silent?: boolean;
+    } = {}
+  ) {
+    const {
+      silent =
+        false,
+    } =
+      opts;
+
     try {
-      setBioLoading(true);
+      setBioLoading(
+        true
+      );
 
       if (!gateActive) {
-        if (!silent) Alert.alert("Bloqueado", "Aplicativo bloqueado no momento.");
+        if (!silent) {
+          Alert.alert(
+            "Aplicativo indisponível",
+            "O aplicativo está temporariamente indisponível."
+          );
+        }
+
         return false;
       }
 
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const enrolled = await LocalAuthentication.isEnrolledAsync();
-      if (!hasHardware || !enrolled) {
+      const [
+        hasHardware,
+        enrolled,
+      ] =
+        await Promise.all([
+          LocalAuthentication.hasHardwareAsync(),
+
+          LocalAuthentication.isEnrolledAsync(),
+        ]);
+
+      if (
+        !hasHardware ||
+        !enrolled
+      ) {
         if (!silent) {
           Alert.alert(
             "Biometria indisponível",
             !hasHardware
-              ? "Seu aparelho não possui hardware biométrico."
-              : "Cadastre sua biometria nas configurações do aparelho."
+              ? "Seu aparelho não possui biometria disponível."
+              : "Cadastre uma biometria nas configurações do aparelho."
           );
         }
+
         return false;
       }
 
-      const enabledFlag = await Storage.getItem("biometricEnabled");
-      if (enabledFlag !== "1") {
+      const enabledFlag =
+        await Storage.getItem(
+          STORAGE_KEYS.biometricEnabled
+        );
+
+      if (
+        enabledFlag !==
+        "1"
+      ) {
         if (!silent) {
           Alert.alert(
-            Platform.OS === "ios" ? "Face ID não configurado" : "Biometria não configurada",
-            "Faça login com CPF e senha e ative a biometria quando solicitado."
+            Platform.OS ===
+              "ios"
+              ? "Face ID não configurado"
+              : "Biometria não configurada",
+
+            "Entre com CPF e senha e ative a biometria quando solicitado."
           );
         }
+
         return false;
       }
 
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: Platform.OS === "android" ? "Entrar com biometria" : "Entrar com Face ID",
-        cancelLabel: "Usar CPF e senha",
-        disableDeviceFallback: true,
-      });
+      const result =
+        await LocalAuthentication.authenticateAsync({
+          promptMessage:
+            Platform.OS ===
+            "ios"
+              ? "Entrar no Meu Freteiro"
+              : "Entrar com biometria",
 
-      if (!result.success) {
-        const err = (result as any)?.error;
+          cancelLabel:
+            "Usar CPF e senha",
+
+          disableDeviceFallback:
+            true,
+        });
+
+      if (
+        !result.success
+      ) {
         if (!silent) {
-          if (err === "lockout" || err === "lockout_permanent") {
-            Alert.alert("Biometria bloqueada", "Desbloqueie o aparelho com sua senha e tente novamente.");
-          } else if (err && err !== "user_cancel" && err !== "system_cancel") {
-            Alert.alert("Não foi possível autenticar", "Tente novamente.");
+          const biometricError =
+            "error" in result
+              ? result.error
+              : undefined;
+
+          if (
+            biometricError ===
+              "lockout" ||
+            biometricError ===
+              "lockout_permanent"
+          ) {
+            Alert.alert(
+              "Biometria bloqueada",
+              "Desbloqueie o aparelho com sua senha e tente novamente."
+            );
+          } else if (
+            biometricError &&
+            biometricError !==
+              "user_cancel" &&
+            biometricError !==
+              "system_cancel"
+          ) {
+            Alert.alert(
+              "Não foi possível autenticar",
+              "Tente novamente."
+            );
           }
         }
+
         return false;
       }
 
-      // tenta refresh
-      const refreshToken = await Storage.getItem("refreshToken");
-      if (refreshToken) {
-        const res = await fetch(`${API_BASE}/api/mobile/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refreshToken }),
-        });
-        const okRaw = await res.text().catch(() => "");
-        let okData: LoginResponse | null = null;
-        try {
-          okData = okRaw ? (JSON.parse(okRaw) as LoginResponse) : null;
-        } catch {}
-        if (res.ok && okData?.token) {
-          await Storage.setItem("authToken", okData.token);
-          await Storage.setItem("userRole", okData.user?.role ?? "caminhoneiro");
-          await Storage.setItem("userId", String(okData.user?.id ?? ""));
-          if (okData.refreshToken) await Storage.setItem("refreshToken", okData.refreshToken);
-          registerPushTokenOnBackend(API_BASE).catch(() => {});
-          router.replace(FRETES_ROUTE);
-          return true;
-        }
-      }
+      const [
+        savedCpf,
+        savedPassword,
+      ] =
+        await Promise.all([
+          Storage.getItem(
+            STORAGE_KEYS.biometricCpf
+          ),
 
-      // fallback: credenciais salvas (apenas se usuário optou por biometria)
-      const savedCpf = await Storage.getItem("bio_cpf");
-      const savedPw = await Storage.getItem("bio_pw");
-      if (!savedCpf || !savedPw) {
+          Storage.getItem(
+            STORAGE_KEYS.biometricPassword
+          ),
+        ]);
+
+      if (
+        !savedCpf ||
+        !savedPassword
+      ) {
         if (!silent) {
           Alert.alert(
-            Platform.OS === "ios" ? "Face ID não configurado" : "Biometria não configurada",
-            "Faça login com CPF e senha e ative a biometria quando solicitado."
+            "Biometria não configurada",
+            "Entre novamente com CPF e senha para configurar a biometria."
           );
         }
+
         return false;
       }
 
-      const res = await fetch(`${API_BASE}/api/mobile/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: savedCpf, cpf: savedCpf, password: savedPw, senha: savedPw }),
-      });
-      const raw = await res.text().catch(() => "");
-      let data: LoginResponse | null = null;
-      try {
-        data = raw ? (JSON.parse(raw) as LoginResponse) : null;
-      } catch {}
+      const data =
+        await fazerLogin(
+          savedCpf,
+          savedPassword
+        );
 
-      if (res.ok && data?.token) {
-        await Storage.setItem("authToken", data.token);
-        await Storage.setItem("userRole", data.user?.role ?? "caminhoneiro");
-        await Storage.setItem("userId", String(data.user?.id ?? ""));
-        if (data.refreshToken) await Storage.setItem("refreshToken", data.refreshToken);
-        registerPushTokenOnBackend(API_BASE).catch(() => {});
-        router.replace(FRETES_ROUTE);
-        return true;
+      await salvarSessao(
+        data
+      );
+
+      router.replace(
+        FRETES_ROUTE
+      );
+
+      return true;
+    } catch (error) {
+      console.warn(
+        error
+      );
+
+      if (!silent) {
+        Alert.alert(
+          "Não foi possível entrar",
+          error instanceof
+            Error
+            ? error.message
+            : "Falha na autenticação biométrica."
+        );
       }
 
-      if (!silent) Alert.alert("Falha ao entrar", "Não foi possível reautenticar automaticamente.");
-      return false;
-    } catch (e) {
-      console.warn(e);
-      if (!silent) Alert.alert("Erro", "Falha na autenticação biométrica.");
       return false;
     } finally {
-      setBioLoading(false);
+      setBioLoading(
+        false
+      );
     }
   }
 
-  // --------- UI ----------
-  if (booting || gateChecking) {
+  /* ======================================================= */
+  /* CARREGAMENTO */
+  /* ======================================================= */
+
+  if (
+    booting ||
+    gateChecking
+  ) {
     return (
-      <SafeAreaView style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8 }}>
-          {gateChecking ? "Validando aplicativo..." : "Carregando..."}
+      <SafeAreaView
+        style={
+          styles.centered
+        }
+      >
+        <ActivityIndicator
+          size="large"
+          color="#FACC15"
+        />
+
+        <Text
+          style={
+            styles.loadingText
+          }
+        >
+          {gateChecking
+            ? "Validando aplicativo..."
+            : "Carregando..."}
         </Text>
       </SafeAreaView>
     );
   }
 
+  /* ======================================================= */
+  /* GATE BLOQUEADO */
+  /* ======================================================= */
+
   if (!gateActive) {
     return (
-      <SafeAreaView style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <Text style={{ fontSize: 20, fontWeight: "800", marginBottom: 8 }}>Aplicativo bloqueado</Text>
-        <Text style={{ textAlign: "center", color: "#6b7280" }}>
-          {gateMessage || "Este aplicativo está temporariamente indisponível."}
-        </Text>
-        <TouchableOpacity
-          style={[styles.button, { marginTop: 16 }]}
-          onPress={() => checkGate({ requireOnlineIfNeverValidated: false })}
+      <SafeAreaView
+        style={
+          styles.blockedContainer
+        }
+      >
+        <Text
+          style={
+            styles.blockedTitle
+          }
         >
-          <Text style={styles.buttonText}>Tentar novamente</Text>
+          Aplicativo indisponível
+        </Text>
+
+        <Text
+          style={
+            styles.blockedText
+          }
+        >
+          {gateMessage ||
+            "O Meu Freteiro está temporariamente indisponível."}
+        </Text>
+
+        <TouchableOpacity
+          style={[
+            styles.button,
+            {
+              marginTop:
+                20,
+            },
+          ]}
+          onPress={
+            () =>
+              checkGate({
+                requireOnlineIfNeverValidated:
+                  false,
+              })
+          }
+        >
+          <Text
+            style={
+              styles.buttonText
+            }
+          >
+            Tentar novamente
+          </Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
   }
 
+  /* ======================================================= */
+  /* LOGIN */
+  /* ======================================================= */
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }} edges={["top", "left", "right"]}>
+    <SafeAreaView
+      style={
+        styles.safeArea
+      }
+      edges={[
+        "top",
+        "left",
+        "right",
+      ]}
+    >
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{
+          flex:
+            1,
+        }}
+        behavior={
+          Platform.OS ===
+          "ios"
+            ? "padding"
+            : undefined
+        }
       >
-        <View style={[styles.header, { paddingTop: (insets.top ?? 0) + 12 }]}>
-          <Text style={styles.brand}>
-            vou<Text style={{ color: "#000" }}>carregar</Text>
+        {/* ================================================= */}
+        {/* MARCA */}
+        {/* ================================================= */}
+
+        <View
+          style={[
+            styles.header,
+            {
+              paddingTop:
+                (insets.top ??
+                  0) +
+                12,
+            },
+          ]}
+        >
+          <Text
+            style={
+              styles.brand
+            }
+          >
+            Meu Freteiro
+          </Text>
+
+          <Text
+            style={
+              styles.brandSubtitle
+            }
+          >
+            Encontre oportunidades de frete
           </Text>
         </View>
 
-        <View style={styles.container}>
-          <View style={{ marginBottom: 16 }}>
-            <Text style={styles.title}>Olá, boas-vindas!</Text>
-            <Text style={styles.subtitle}>Digite seu CPF e senha para acessar.</Text>
+        {/* ================================================= */}
+        {/* FORMULÁRIO */}
+        {/* ================================================= */}
+
+        <View
+          style={
+            styles.container
+          }
+        >
+          <View
+            style={
+              styles.intro
+            }
+          >
+            <Text
+              style={
+                styles.title
+              }
+            >
+              Olá, freteiro!
+            </Text>
+
+            <Text
+              style={
+                styles.subtitle
+              }
+            >
+              Entre com seu CPF e senha para acessar sua conta.
+            </Text>
           </View>
+
+          {/* CPF */}
 
           <TextInput
             placeholder="CPF"
-            value={cpf}
-            onChangeText={(v) => setCpf(formatarCpf(v))}
+            value={
+              cpf
+            }
+            onChangeText={
+              (
+                value
+              ) =>
+                setCpf(
+                  formatarCpf(
+                    value
+                  )
+                )
+            }
             keyboardType="number-pad"
             autoCapitalize="none"
-            autoCorrect={false}
+            autoCorrect={
+              false
+            }
             textContentType="username"
-            maxLength={14}
-            editable={!loading}
-            style={styles.input}
+            maxLength={
+              14
+            }
+            editable={
+              !loading
+            }
+            style={
+              styles.input
+            }
             placeholderTextColor="#9ca3af"
           />
 
-          <View style={{ position: "relative", width: "100%" }}>
+          {/* SENHA */}
+
+          <View
+            style={
+              styles.passwordContainer
+            }
+          >
             <TextInput
               placeholder="Senha"
-              value={senha}
-              onChangeText={setSenha}
-              secureTextEntry={!mostrarSenha}
+              value={
+                senha
+              }
+              onChangeText={
+                setSenha
+              }
+              secureTextEntry={
+                !mostrarSenha
+              }
               autoCapitalize="none"
-              autoCorrect={false}
+              autoCorrect={
+                false
+              }
               textContentType="password"
-              editable={!loading}
-              style={[styles.input, { paddingRight: 44 }]}
+              editable={
+                !loading
+              }
+              style={[
+                styles.input,
+                styles.passwordInput,
+              ]}
               placeholderTextColor="#9ca3af"
             />
+
             <TouchableOpacity
-              onPress={() => setMostrarSenha((p) => !p)}
-              style={styles.eyeBtn}
-              activeOpacity={0.8}
-              disabled={loading}
+              onPress={
+                () =>
+                  setMostrarSenha(
+                    (
+                      atual
+                    ) =>
+                      !atual
+                  )
+              }
+              style={
+                styles.eyeBtn
+              }
+              activeOpacity={
+                0.8
+              }
+              disabled={
+                loading
+              }
               accessibilityRole="button"
-              accessibilityLabel={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+              accessibilityLabel={
+                mostrarSenha
+                  ? "Ocultar senha"
+                  : "Mostrar senha"
+              }
             >
-              <Text style={{ fontSize: 16 }}>{mostrarSenha ? "🔒" : "👁️"}</Text>
+              <Text
+                style={
+                  styles.eyeText
+                }
+              >
+                {mostrarSenha
+                  ? "Ocultar"
+                  : "Ver"}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          {!!erro && <Text style={{ color: "#dc2626", textAlign: "center", marginTop: 8 }}>{erro}</Text>}
+          {/* ERRO */}
 
-          <TouchableOpacity onPress={handleSubmit} style={styles.button} disabled={loading}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Continuar</Text>}
-          </TouchableOpacity>
-
-          {bioAvailable && bioEnabled && (
-            <TouchableOpacity
-              onPress={() => tryBiometricLogin()}
-              style={[styles.button, { backgroundColor: "#111827", marginTop: 10 }]}
-              disabled={bioLoading}
+          {!!erro && (
+            <Text
+              style={
+                styles.errorText
+              }
             >
-              {bioLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>
-                  {Platform.OS === "ios" ? "Entrar com Face ID" : "Entrar com biometria"}
-                </Text>
-              )}
-            </TouchableOpacity>
+              {erro}
+            </Text>
           )}
 
-          {/* ...já tinha recuperar senha e cadastro... */}
+          {/* ENTRAR */}
 
-          <TouchableOpacity onPress={() => router.push("/recuperar-senha")} style={{ marginTop: 14 }} disabled={loading}>
-            <Text style={{ color: "#dc2626", fontSize: 13, fontWeight: "600" }}>Esqueceu sua senha?</Text>
+          <TouchableOpacity
+            onPress={
+              handleSubmit
+            }
+            style={
+              styles.button
+            }
+            disabled={
+              loading
+            }
+            activeOpacity={
+              0.85
+            }
+          >
+            {loading ? (
+              <ActivityIndicator
+                color="#111827"
+              />
+            ) : (
+              <Text
+                style={
+                  styles.buttonText
+                }
+              >
+                Entrar
+              </Text>
+            )}
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => router.push("/cadastro")} style={{ marginTop: 14 }} disabled={loading}>
-            <Text style={{ color: "#dc2626", fontSize: 13, fontWeight: "600" }}>
-              Ainda não tem conta? Cadastre-se aqui
+          {/* BIOMETRIA */}
+
+          {bioAvailable &&
+            bioEnabled && (
+              <TouchableOpacity
+                onPress={
+                  () =>
+                    tryBiometricLogin()
+                }
+                style={
+                  styles.biometricButton
+                }
+                disabled={
+                  bioLoading
+                }
+                activeOpacity={
+                  0.85
+                }
+              >
+                {bioLoading ? (
+                  <ActivityIndicator
+                    color="#111827"
+                  />
+                ) : (
+                  <Text
+                    style={
+                      styles.biometricButtonText
+                    }
+                  >
+                    {Platform.OS ===
+                    "ios"
+                      ? "Entrar com Face ID"
+                      : "Entrar com biometria"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )}
+
+          {/* LINKS */}
+
+          <TouchableOpacity
+            onPress={
+              () =>
+                router.push(
+                  "/recuperar-senha"
+                )
+            }
+            style={
+              styles.linkButton
+            }
+            disabled={
+              loading
+            }
+          >
+            <Text
+              style={
+                styles.linkText
+              }
+            >
+              Esqueceu sua senha?
             </Text>
           </TouchableOpacity>
 
-          {/* NOVO: link público para a Ajuda */}
           <TouchableOpacity
-            onPress={() => router.push("/ajuda")}
-            style={{ marginTop: 10, paddingVertical: 6 }}
+            onPress={
+              () =>
+                router.push(
+                  "/cadastro"
+                )
+            }
+            style={
+              styles.linkButton
+            }
+            disabled={
+              loading
+            }
+          >
+            <Text
+              style={
+                styles.linkText
+              }
+            >
+              Ainda não tem conta? Cadastre-se
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={
+              () =>
+                router.push(
+                  "/ajuda"
+                )
+            }
+            style={
+              styles.linkButton
+            }
             accessibilityRole="link"
             accessibilityLabel="Abrir Ajuda e Suporte"
-            disabled={loading}
+            disabled={
+              loading
+            }
           >
-            <Text style={{ color: "#dc2626", fontSize: 13, fontWeight: "700" }}>
+            <Text
+              style={
+                styles.secondaryLink
+              }
+            >
               Precisa de ajuda?
             </Text>
           </TouchableOpacity>
 
-          {/* Link interno para Política de Privacidade */}
-          <View style={{ width: "100%", marginTop: 22, alignItems: "center" }}>
-            <Text style={{ fontSize: 12, color: "#6b7280", textAlign: "center", paddingHorizontal: 8 }}>
+          {/* POLÍTICA */}
+
+          <View
+            style={
+              styles.policyContainer
+            }
+          >
+            <Text
+              style={
+                styles.policyText
+              }
+            >
               Ao continuar, você declara que leu e concorda com nossa
             </Text>
+
             <TouchableOpacity
-              onPress={() => router.push("/politica-privacidade")}
-              style={{ paddingVertical: 6 }}
+              onPress={
+                () =>
+                  router.push(
+                    "/politica-privacidade"
+                  )
+              }
               accessibilityRole="link"
               accessibilityLabel="Abrir Política de Privacidade"
             >
               <Text
-                style={{
-                  fontSize: 13,
-                  fontWeight: "700",
-                  color: "#dc2626",
-                  textDecorationLine: "underline",
-                }}
+                style={
+                  styles.policyLink
+                }
               >
                 Política de Privacidade
               </Text>
             </TouchableOpacity>
           </View>
-
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  header: {
-    width: "100%",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#fff",
-  },
-  brand: { fontSize: 22, fontWeight: "800", color: "#ea580c" },
+/* ========================================================= */
+/* ESTILOS */
+/* ========================================================= */
 
-  container: { flex: 1, padding: 20, alignItems: "center", backgroundColor: "#fff" },
-  title: { fontSize: 18, fontWeight: "700", color: "#111827" },
-  subtitle: { fontSize: 13, color: "#6b7280", marginTop: 2 },
-  input: {
-    width: "100%",
-    height: INPUT_HEIGHT,
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    color: "#111827",
-    marginTop: 10,
-    fontSize: 14,
-    backgroundColor: "#fff",
-  },
-  eyeBtn: { position: "absolute", right: 10, top: "50%", marginTop: -10 },
-  button: {
-    width: "100%",
-    height: 48,
-    backgroundColor: "#ea580c",
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 10,
-  },
-  buttonText: { color: "#fff", fontWeight: "700" },
-});
+const styles =
+  StyleSheet.create({
+    safeArea: {
+      flex:
+        1,
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    centered: {
+      flex:
+        1,
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    loadingText: {
+      marginTop:
+        10,
+
+      color:
+        "#6b7280",
+
+      fontSize:
+        14,
+    },
+
+    blockedContainer: {
+      flex:
+        1,
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      padding:
+        24,
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    blockedTitle: {
+      fontSize:
+        22,
+
+      fontWeight:
+        "800",
+
+      color:
+        "#111827",
+
+      marginBottom:
+        8,
+    },
+
+    blockedText: {
+      textAlign:
+        "center",
+
+      color:
+        "#6b7280",
+
+      fontSize:
+        14,
+
+      lineHeight:
+        20,
+    },
+
+    header: {
+      width:
+        "100%",
+
+      paddingHorizontal:
+        20,
+
+      paddingBottom:
+        18,
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      borderBottomWidth:
+        1,
+
+      borderBottomColor:
+        "#f1f5f9",
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    brand: {
+      fontSize:
+        27,
+
+      fontWeight:
+        "900",
+
+      color:
+        "#111827",
+
+      letterSpacing:
+        -0.5,
+    },
+
+    brandSubtitle: {
+      marginTop:
+        3,
+
+      fontSize:
+        12,
+
+      color:
+        "#6b7280",
+    },
+
+    container: {
+      flex:
+        1,
+
+      paddingHorizontal:
+        24,
+
+      paddingTop:
+        34,
+
+      alignItems:
+        "center",
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    intro: {
+      width:
+        "100%",
+
+      marginBottom:
+        18,
+    },
+
+    title: {
+      fontSize:
+        22,
+
+      fontWeight:
+        "800",
+
+      color:
+        "#111827",
+    },
+
+    subtitle: {
+      fontSize:
+        14,
+
+      color:
+        "#6b7280",
+
+      marginTop:
+        5,
+
+      lineHeight:
+        20,
+    },
+
+    input: {
+      width:
+        "100%",
+
+      height:
+        INPUT_HEIGHT,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#d1d5db",
+
+      borderRadius:
+        12,
+
+      paddingHorizontal:
+        14,
+
+      color:
+        "#111827",
+
+      marginTop:
+        10,
+
+      fontSize:
+        14,
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    passwordContainer: {
+      position:
+        "relative",
+
+      width:
+        "100%",
+    },
+
+    passwordInput: {
+      paddingRight:
+        70,
+    },
+
+    eyeBtn: {
+      position:
+        "absolute",
+
+      right:
+        14,
+
+      top:
+        10,
+
+      height:
+        INPUT_HEIGHT,
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+    },
+
+    eyeText: {
+      fontSize:
+        12,
+
+      fontWeight:
+        "700",
+
+      color:
+        "#6b7280",
+    },
+
+    errorText: {
+      width:
+        "100%",
+
+      color:
+        "#dc2626",
+
+      textAlign:
+        "center",
+
+      marginTop:
+        12,
+
+      fontSize:
+        13,
+    },
+
+    button: {
+      width:
+        "100%",
+
+      height:
+        52,
+
+      backgroundColor:
+        "#FACC15",
+
+      borderRadius:
+        12,
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      marginTop:
+        16,
+    },
+
+    buttonText: {
+      color:
+        "#111827",
+
+      fontWeight:
+        "800",
+
+      fontSize:
+        15,
+    },
+
+    biometricButton: {
+      width:
+        "100%",
+
+      height:
+        50,
+
+      borderRadius:
+        12,
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      marginTop:
+        10,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#d1d5db",
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    biometricButtonText: {
+      color:
+        "#111827",
+
+      fontWeight:
+        "700",
+
+      fontSize:
+        14,
+    },
+
+    linkButton: {
+      marginTop:
+        15,
+
+      paddingVertical:
+        3,
+    },
+
+    linkText: {
+      color:
+        "#111827",
+
+      fontSize:
+        13,
+
+      fontWeight:
+        "700",
+    },
+
+    secondaryLink: {
+      color:
+        "#4b5563",
+
+      fontSize:
+        13,
+
+      fontWeight:
+        "600",
+    },
+
+    policyContainer: {
+      width:
+        "100%",
+
+      marginTop:
+        25,
+
+      alignItems:
+        "center",
+    },
+
+    policyText: {
+      fontSize:
+        12,
+
+      color:
+        "#6b7280",
+
+      textAlign:
+        "center",
+
+      paddingHorizontal:
+        8,
+    },
+
+    policyLink: {
+      marginTop:
+        5,
+
+      fontSize:
+        13,
+
+      fontWeight:
+        "700",
+
+      color:
+        "#111827",
+
+      textDecorationLine:
+        "underline",
+    },
+  });

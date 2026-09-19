@@ -4,24 +4,44 @@
       "developmentClient": true,
       "distribution": "internal",
       "channel": "dev",
-      "env": { "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br" },
-      "android": { "buildType": "apk" }
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://www.meufreteiro.com"
+      },
+      "android": {
+        "buildType": "apk"
+      }
     },
+
     "preview": {
       "channel": "preview",
-      "env": { "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br" },
-      "android": { "buildType": "apk" }
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://www.meufreteiro.com"
+      },
+      "android": {
+        "buildType": "apk"
+      }
     },
+
     "production": {
       "channel": "production",
-      "android": { "buildType": "app-bundle" },
-      "env": { "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br" }
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://www.meufreteiro.com"
+      }
     },
+
     "simulator": {
-      "ios": { "simulator": true },
-      "env": { "EXPO_PUBLIC_API_URL": "https://app.voucarregar.com.br" }
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://www.meufreteiro.com"
+      }
     }
   },
+
   "submit": {
     "production": {}
   }

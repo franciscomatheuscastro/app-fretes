@@ -1,10 +1,12 @@
 // app/cadastro/index.tsx
+
 import * as DocumentPicker from "expo-document-picker";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -13,537 +15,3659 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
-const API_BASE = "https://app.voucarregar.com.br";
+/* ========================================================= */
+/* CONFIGURAÇÃO */
+/* ========================================================= */
 
-// 🔧 Cloudinary (preencha com seus dados; o upload preset precisa ser UNSIGNED)
-const CLOUDINARY_CLOUD_NAME = "dm8jg5l59";
-const CLOUDINARY_UPLOAD_PRESET = "voucarregar";
+const API_BASE = "https://www.meufreteiro.com";
 
-type TipoCadastro = "caminhoneiro";
+const LIMITE_ARQUIVO_MB =
+  10;
+
+/* ========================================================= */
+/* TIPOS */
+/* ========================================================= */
+
+type Etapa =
+  | 1
+  | 2
+  | 3
+  | 4;
+
+type TipoVeiculo =
+  | "MOTO"
+  | "CARRO"
+  | "FIORINO_UTILITARIO_PEQUENO"
+  | "VAN"
+  | "CAMINHAO_PEQUENO"
+  | "CAMINHAO_MEDIO"
+  | "OUTRO";
+
+type TipoDocumento =
+  | "cnh"
+  | "documento-veiculo"
+  | "comprovante-endereco";
 
 type FormularioCadastro = {
   nome: string;
   cpf: string;
-  cidade: string;
-  estado: string;
-  bairro: string;
-  rua: string;
-  cep: string;
   email: string;
   celular: string;
-  senha: string;
-  confirmarSenha: string;
+  cidade: string;
+  estado: string;
+
+  tipoVeiculo:
+    | TipoVeiculo
+    | "";
+
+  placaVeiculo: string;
+
   aceitaWhatsapp: boolean;
   aceitaLgpd: boolean;
 };
 
-function formatarCpf(v: string) {
-  return v
-    .replace(/\D/g, "")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d{1,2})$/, "$1-$2")
-    .slice(0, 14);
-}
-function formatarCep(v: string) {
-  return v.replace(/\D/g, "").replace(/^(\d{5})(\d)/, "$1-$2").slice(0, 9);
-}
-function formatarCelular(v: string) {
-  return v
-    .replace(/\D/g, "")
-    .replace(/^(\d{2})(\d)/, "($1) $2")
-    .replace(/(\d{5})(\d)/, "$1-$2")
-    .slice(0, 15);
+type DocumentoSelecionado =
+  DocumentPicker.DocumentPickerAsset | null;
+
+type UploadResponse = {
+  key?: string;
+  url?: string;
+  error?: string;
+  erro?: string;
+  mensagem?: string;
+};
+
+type CadastroResponse = {
+  ok?: boolean;
+  id?: string;
+  mensagem?: string;
+  message?: string;
+  error?: string;
+  erro?: string;
+};
+
+/* ========================================================= */
+/* VEÍCULOS */
+/* ========================================================= */
+
+const TIPOS_VEICULO: Array<{
+  value: TipoVeiculo;
+  label: string;
+}> = [
+  {
+    value:
+      "MOTO",
+    label:
+      "Moto",
+  },
+  {
+    value:
+      "CARRO",
+    label:
+      "Carro",
+  },
+  {
+    value:
+      "FIORINO_UTILITARIO_PEQUENO",
+    label:
+      "Fiorino / Utilitário pequeno",
+  },
+  {
+    value:
+      "VAN",
+    label:
+      "Van",
+  },
+  {
+    value:
+      "CAMINHAO_PEQUENO",
+    label:
+      "Caminhão pequeno",
+  },
+  {
+    value:
+      "CAMINHAO_MEDIO",
+    label:
+      "Caminhão médio",
+  },
+  {
+    value:
+      "OUTRO",
+    label:
+      "Outro",
+  },
+];
+
+/* ========================================================= */
+/* HELPERS */
+/* ========================================================= */
+
+function formatarCpf(
+  valor: string
+) {
+  return valor
+    .replace(
+      /\D/g,
+      ""
+    )
+    .replace(
+      /(\d{3})(\d)/,
+      "$1.$2"
+    )
+    .replace(
+      /(\d{3})(\d)/,
+      "$1.$2"
+    )
+    .replace(
+      /(\d{3})(\d{1,2})$/,
+      "$1-$2"
+    )
+    .slice(
+      0,
+      14
+    );
 }
 
-// 🔼 Upload da CNH para Cloudinary; retorna URL segura
-async function uploadCnhParaCloudinary(asset: DocumentPicker.DocumentPickerAsset) {
-  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
-    throw new Error(
-      "Cloudinary não configurado. Defina CLOUDINARY_CLOUD_NAME e CLOUDINARY_UPLOAD_PRESET no código."
+function formatarCelular(
+  valor: string
+) {
+  const numeros =
+    valor
+      .replace(
+        /\D/g,
+        ""
+      )
+      .slice(
+        0,
+        11
+      );
+
+  if (
+    numeros.length <=
+    10
+  ) {
+    return numeros
+      .replace(
+        /^(\d{2})(\d)/,
+        "($1) $2"
+      )
+      .replace(
+        /(\d{4})(\d)/,
+        "$1-$2"
+      );
+  }
+
+  return numeros
+    .replace(
+      /^(\d{2})(\d)/,
+      "($1) $2"
+    )
+    .replace(
+      /(\d{5})(\d)/,
+      "$1-$2"
+    );
+}
+
+function formatarPlaca(
+  valor: string
+) {
+  return valor
+    .replace(
+      /[^a-zA-Z0-9]/g,
+      ""
+    )
+    .toUpperCase()
+    .slice(
+      0,
+      7
+    );
+}
+
+function normalizarTexto(
+  valor: string
+) {
+  return valor
+    .trim()
+    .replace(
+      /\s+/g,
+      " "
+    );
+}
+
+function emailValido(
+  email: string
+) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    email.trim()
+  );
+}
+
+function placaValida(
+  placa: string
+) {
+  const valor =
+    placa
+      .replace(
+        /[^A-Z0-9]/gi,
+        ""
+      )
+      .toUpperCase();
+
+  /*
+   * Padrão antigo:
+   * ABC1234
+   *
+   * Mercosul:
+   * ABC1D23
+   */
+  return (
+    /^[A-Z]{3}[0-9]{4}$/.test(
+      valor
+    ) ||
+    /^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(
+      valor
+    )
+  );
+}
+
+function nomeArquivo(
+  documento: DocumentoSelecionado
+) {
+  if (!documento) {
+    return "";
+  }
+
+  return (
+    documento.name ||
+    "arquivo selecionado"
+  );
+}
+
+function tamanhoValido(
+  documento: DocumentoSelecionado
+) {
+  if (
+    !documento ||
+    !documento.size
+  ) {
+    return true;
+  }
+
+  return (
+    documento.size <=
+    LIMITE_ARQUIVO_MB *
+      1024 *
+      1024
+  );
+}
+
+function tipoMimeArquivo(
+  asset: DocumentPicker.DocumentPickerAsset
+) {
+  if (
+    asset.mimeType
+  ) {
+    return asset.mimeType;
+  }
+
+  const nome =
+    asset.name
+      ?.toLowerCase() ||
+    "";
+
+  if (
+    nome.endsWith(
+      ".pdf"
+    )
+  ) {
+    return "application/pdf";
+  }
+
+  if (
+    nome.endsWith(
+      ".png"
+    )
+  ) {
+    return "image/png";
+  }
+
+  return "image/jpeg";
+}
+
+/* ========================================================= */
+/* COMPONENTE */
+/* ========================================================= */
+
+export default function CadastroFreteiro() {
+  const router =
+    useRouter();
+
+  const insets =
+    useSafeAreaInsets();
+
+  /* ======================================================= */
+  /* ESTADO GERAL */
+  /* ======================================================= */
+
+  const [
+    etapa,
+    setEtapa,
+  ] =
+    useState<Etapa>(
+      1
+    );
+
+  const [
+    enviando,
+    setEnviando,
+  ] =
+    useState(false);
+
+  const [
+    mensagem,
+    setMensagem,
+  ] =
+    useState("");
+
+  const [
+    seletorVeiculoAberto,
+    setSeletorVeiculoAberto,
+  ] =
+    useState(false);
+
+  /* ======================================================= */
+  /* FORMULÁRIO */
+  /* ======================================================= */
+
+  const [
+    form,
+    setForm,
+  ] =
+    useState<FormularioCadastro>({
+      nome:
+        "",
+
+      cpf:
+        "",
+
+      email:
+        "",
+
+      celular:
+        "",
+
+      cidade:
+        "",
+
+      estado:
+        "",
+
+      tipoVeiculo:
+        "",
+
+      placaVeiculo:
+        "",
+
+      aceitaWhatsapp:
+        false,
+
+      aceitaLgpd:
+        false,
+    });
+
+  /* ======================================================= */
+  /* DOCUMENTOS */
+  /* ======================================================= */
+
+  const [
+    cnh,
+    setCnh,
+  ] =
+    useState<DocumentoSelecionado>(
+      null
+    );
+
+  const [
+    documentoVeiculo,
+    setDocumentoVeiculo,
+  ] =
+    useState<DocumentoSelecionado>(
+      null
+    );
+
+  const [
+    comprovanteEndereco,
+    setComprovanteEndereco,
+  ] =
+    useState<DocumentoSelecionado>(
+      null
+    );
+
+  /* ======================================================= */
+  /* FORM HELPERS */
+  /* ======================================================= */
+
+  function atualizar<
+    K extends keyof FormularioCadastro
+  >(
+    campo: K,
+    valor: FormularioCadastro[K]
+  ) {
+    setForm(
+      (
+        anterior
+      ) => ({
+        ...anterior,
+        [campo]:
+          valor,
+      })
     );
   }
 
-  const fd = new FormData();
-  // @ts-expect-error RN file
-  fd.append("file", {
-    uri: asset.uri,
-    name:
-      asset.name ??
-      (asset.mimeType?.includes("pdf") ? "cnh.pdf" : "cnh.jpg"),
-    type:
-      asset.mimeType ??
-      (asset.name?.toLowerCase().endsWith(".pdf")
-        ? "application/pdf"
-        : "image/jpeg"),
-  });
-  fd.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-  fd.append("folder", "voucarregar");
+  /* ======================================================= */
+  /* DOCUMENT PICKER */
+  /* ======================================================= */
 
-  const res = await fetch(
-    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
-    { method: "POST", body: fd }
-  );
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || !json?.secure_url) {
-    throw new Error(json?.error?.message || "Falha no upload da CNH.");
-  }
-  return String(json.secure_url) as string;
-}
-
-export default function CadastroCaminhoneiro() {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-
-  const [etapa, setEtapa] = useState<1 | 2 | 3>(1);
-  const [enviando, setEnviando] = useState(false);
-  const [mensagem, setMensagem] = useState("");
-
-  const tipo: TipoCadastro = "caminhoneiro";
-
-  const [form, setForm] = useState<FormularioCadastro>({
-    nome: "",
-    cpf: "",
-    cidade: "",
-    estado: "",
-    bairro: "",
-    rua: "",
-    cep: "",
-    email: "",
-    celular: "",
-    senha: "",
-    confirmarSenha: "",
-    aceitaWhatsapp: false,
-    aceitaLgpd: false,
-  });
-
-  const [cnh, setCnh] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
-
-  function atualizar<K extends keyof FormularioCadastro>(k: K, v: FormularioCadastro[K]) {
-    setForm((p) => ({ ...p, [k]: v }));
-  }
-
-  async function escolherCNH() {
+  async function selecionarDocumento(
+    destino:
+      | "cnh"
+      | "documentoVeiculo"
+      | "comprovanteEndereco"
+  ) {
     try {
-      const res = await DocumentPicker.getDocumentAsync({
-        type: ["image/*", "application/pdf"],
-        multiple: false,
-        copyToCacheDirectory: true,
-      });
-      if (!res.canceled && res.assets?.[0]) {
-        setCnh(res.assets[0]);
+      const resultado =
+        await DocumentPicker.getDocumentAsync({
+          type: [
+            "application/pdf",
+            "image/jpeg",
+            "image/png",
+          ],
+
+          multiple:
+            false,
+
+          copyToCacheDirectory:
+            true,
+        });
+
+      if (
+        resultado.canceled ||
+        !resultado.assets?.[0]
+      ) {
+        return;
       }
-    } catch {
-      Alert.alert("Erro", "Não foi possível selecionar o arquivo.");
-    }
-  }
 
-  async function buscarPorCEP(cepMascarado: string) {
-    const cepLimpo = cepMascarado.replace(/\D/g, "");
-    if (cepLimpo.length !== 8) return;
-    try {
-      const res = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
-      const data = await res.json();
-      if (data?.erro) return;
-      atualizar("rua", data.logradouro || "");
-      atualizar("bairro", data.bairro || "");
-      atualizar("cidade", data.localidade || "");
-      atualizar("estado", data.uf || "");
-    } catch {}
-  }
+      const asset =
+        resultado.assets[0];
 
-  async function enviarFormulario() {
-    try {
-      setMensagem("");
+      if (
+        !tamanhoValido(
+          asset
+        )
+      ) {
+        Alert.alert(
+          "Arquivo muito grande",
+          `O arquivo deve ter no máximo ${LIMITE_ARQUIVO_MB} MB.`
+        );
 
-      if (form.senha !== form.confirmarSenha) {
-        setMensagem("As senhas não coincidem.");
         return;
       }
 
       if (
-        !form.nome ||
-        !form.cpf ||
-        !form.email ||
-        !form.cidade ||
-        !form.estado ||
-        !form.rua ||
-        !form.bairro ||
-        !form.cep ||
-        !form.celular ||
-        !cnh
+        destino ===
+        "cnh"
       ) {
-        setMensagem("Preencha todos os campos obrigatórios e anexe a CNH.");
+        setCnh(
+          asset
+        );
+
         return;
       }
 
-      // limite local 10MB
-      const LIM_MB = 10;
-      if (cnh.size && cnh.size > LIM_MB * 1024 * 1024) {
-        setMensagem(`O arquivo da CNH excede ${LIM_MB}MB.`);
+      if (
+        destino ===
+        "documentoVeiculo"
+      ) {
+        setDocumentoVeiculo(
+          asset
+        );
+
         return;
       }
 
-      setEnviando(true);
+      setComprovanteEndereco(
+        asset
+      );
+    } catch (
+      error
+    ) {
+      console.error(
+        "Erro ao selecionar documento:",
+        error
+      );
 
-      // 1) Sobe a CNH e obtém URL
-      const cnhUrl = await uploadCnhParaCloudinary(cnh);
-
-      // 2) Monta payload JSON (igual ao site)
-      const payload = {
-        tipo,
-        aceitaLgpd: form.aceitaLgpd,
-        nome: form.nome, // no caso de caminhoneiro, é o próprio nome
-        nomeFantasia: "", // não usado para caminhoneiro
-        email: form.email,
-        celular: form.celular.replace(/\D/g, ""),
-        cep: form.cep.replace(/\D/g, ""),
-        rua: form.rua,
-        bairro: form.bairro,
-        cidade: form.cidade,
-        estado: form.estado,
-        senha: form.senha,
-        cnpjtexto: undefined, // não se aplica
-        cpf: form.cpf.replace(/\D/g, ""),
-        aceitaWhatsapp: form.aceitaWhatsapp,
-        arquivos: {
-          cnh: cnhUrl, // ✅ URL já hospedada
-          logo: "",
-          comprovanteEndereco: "",
-          cartaoCnpj: "",
-          registroAnttArquivo: "",
-        },
-      };
-
-      // 3) Envia ao backend como JSON
-      const res = await fetch(`${API_BASE}/api/cadastro`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        // a sua API costuma mandar .mensagem
-        throw new Error(body?.mensagem || body?.erro || `Erro ${res.status}`);
-      }
-
-      Alert.alert("Sucesso", "Cadastro concluído! Enviamos seus dados por e-mail.");
-      router.replace("/"); // 👈 envia para index.tsx
-    } catch (e: any) {
-      Alert.alert("Erro", e?.message || "Falha ao enviar cadastro.");
-    } finally {
-      setEnviando(false);
+      Alert.alert(
+        "Erro",
+        "Não foi possível selecionar o arquivo."
+      );
     }
   }
 
-  useEffect(() => {
-    const cepLimpo = form.cep.replace(/\D/g, "");
-    if (cepLimpo.length === 8) buscarPorCEP(form.cep);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.cep]);
+  /* ======================================================= */
+  /* VALIDAÇÃO ETAPA 1 */
+  /* ======================================================= */
+
+  function validarDadosPessoais() {
+    setMensagem(
+      ""
+    );
+
+    const cpfNumerico =
+      form.cpf.replace(
+        /\D/g,
+        ""
+      );
+
+    const celularNumerico =
+      form.celular.replace(
+        /\D/g,
+        ""
+      );
+
+    if (
+      !normalizarTexto(
+        form.nome
+      )
+    ) {
+      setMensagem(
+        "Informe seu nome completo."
+      );
+
+      return false;
+    }
+
+    if (
+      cpfNumerico.length !==
+      11
+    ) {
+      setMensagem(
+        "Informe um CPF válido com 11 dígitos."
+      );
+
+      return false;
+    }
+
+    if (
+      !emailValido(
+        form.email
+      )
+    ) {
+      setMensagem(
+        "Informe um e-mail válido."
+      );
+
+      return false;
+    }
+
+    if (
+      celularNumerico.length <
+      10
+    ) {
+      setMensagem(
+        "Informe um celular válido."
+      );
+
+      return false;
+    }
+
+    if (
+      !normalizarTexto(
+        form.cidade
+      )
+    ) {
+      setMensagem(
+        "Informe sua cidade."
+      );
+
+      return false;
+    }
+
+    if (
+      form.estado
+        .trim()
+        .length !==
+      2
+    ) {
+      setMensagem(
+        "Informe a UF do seu estado."
+      );
+
+      return false;
+    }
+
+    return true;
+  }
+
+  /* ======================================================= */
+  /* VALIDAÇÃO ETAPA 2 */
+  /* ======================================================= */
+
+  function validarVeiculo() {
+    setMensagem(
+      ""
+    );
+
+    if (
+      !form.tipoVeiculo
+    ) {
+      setMensagem(
+        "Selecione o tipo do veículo."
+      );
+
+      return false;
+    }
+
+    if (
+      !placaValida(
+        form.placaVeiculo
+      )
+    ) {
+      setMensagem(
+        "Informe uma placa válida."
+      );
+
+      return false;
+    }
+
+    return true;
+  }
+
+  /* ======================================================= */
+  /* VALIDAÇÃO ETAPA 3 */
+  /* ======================================================= */
+
+  function validarDocumentos() {
+    setMensagem(
+      ""
+    );
+
+    if (!cnh) {
+      setMensagem(
+        "Anexe sua CNH."
+      );
+
+      return false;
+    }
+
+    if (
+      !documentoVeiculo
+    ) {
+      setMensagem(
+        "Anexe o documento do veículo."
+      );
+
+      return false;
+    }
+
+    if (
+      !comprovanteEndereco
+    ) {
+      setMensagem(
+        "Anexe o comprovante de endereço."
+      );
+
+      return false;
+    }
+
+    if (
+      !tamanhoValido(
+        cnh
+      ) ||
+      !tamanhoValido(
+        documentoVeiculo
+      ) ||
+      !tamanhoValido(
+        comprovanteEndereco
+      )
+    ) {
+      setMensagem(
+        `Cada arquivo deve ter no máximo ${LIMITE_ARQUIVO_MB} MB.`
+      );
+
+      return false;
+    }
+
+    return true;
+  }
+
+  /* ======================================================= */
+  /* NAVEGAÇÃO ENTRE ETAPAS */
+  /* ======================================================= */
+
+  function avancarEtapa1() {
+    if (
+      !validarDadosPessoais()
+    ) {
+      return;
+    }
+
+    setMensagem(
+      ""
+    );
+
+    setEtapa(
+      2
+    );
+  }
+
+  function avancarEtapa2() {
+    if (
+      !validarVeiculo()
+    ) {
+      return;
+    }
+
+    setMensagem(
+      ""
+    );
+
+    setEtapa(
+      3
+    );
+  }
+
+  function avancarEtapa3() {
+    if (
+      !validarDocumentos()
+    ) {
+      return;
+    }
+
+    setMensagem(
+      ""
+    );
+
+    setEtapa(
+      4
+    );
+  }
+
+  /* ======================================================= */
+  /* UPLOAD */
+  /* ======================================================= */
+
+  async function uploadDocumento(
+    asset: DocumentPicker.DocumentPickerAsset,
+    tipoDocumento: TipoDocumento
+  ) {
+    const formData =
+      new FormData();
+
+    /*
+     * React Native utiliza este formato para
+     * anexar arquivos ao FormData.
+     */
+    formData.append(
+      "arquivo",
+      {
+        uri:
+          asset.uri,
+
+        name:
+          asset.name ||
+          `${tipoDocumento}.jpg`,
+
+        type:
+          tipoMimeArquivo(
+            asset
+          ),
+      } as any
+    );
+
+    formData.append(
+      "tipoDocumento",
+      tipoDocumento
+    );
+
+    const response =
+      await fetch(
+        `${API_BASE}/api/uploads/cadastro`,
+        {
+          method:
+            "POST",
+
+          /*
+           * NÃO definir Content-Type manualmente.
+           *
+           * O React Native adicionará automaticamente
+           * multipart/form-data com o boundary correto.
+           */
+          body:
+            formData,
+        }
+      );
+
+    const raw =
+      await response
+        .text()
+        .catch(
+          () => ""
+        );
+
+    let body:
+      | UploadResponse
+      | null =
+      null;
+
+    try {
+      body =
+        raw
+          ? (JSON.parse(
+              raw
+            ) as UploadResponse)
+          : null;
+    } catch {
+      body =
+        null;
+    }
+
+    if (
+      !response.ok ||
+      !body?.url
+    ) {
+      throw new Error(
+        body?.error ||
+          body?.erro ||
+          body?.mensagem ||
+          `Não foi possível enviar o documento. HTTP ${response.status}.`
+      );
+    }
+
+    return body.url;
+  }
+
+  /* ======================================================= */
+  /* CADASTRO */
+/* ======================================================= */
+
+  async function enviarCadastro() {
+    if (
+      enviando
+    ) {
+      return;
+    }
+
+    setMensagem(
+      ""
+    );
+
+    if (
+      !validarDadosPessoais() ||
+      !validarVeiculo() ||
+      !validarDocumentos()
+    ) {
+      return;
+    }
+
+    if (
+      !form.aceitaLgpd
+    ) {
+      setMensagem(
+        "Você precisa aceitar os Termos de Uso e a Política de Privacidade."
+      );
+
+      return;
+    }
+
+    if (
+      !cnh ||
+      !documentoVeiculo ||
+      !comprovanteEndereco
+    ) {
+      setMensagem(
+        "Selecione todos os documentos obrigatórios."
+      );
+
+      return;
+    }
+
+    try {
+      setEnviando(
+        true
+      );
+
+      /* =================================================== */
+      /* 1. UPLOAD DOS DOCUMENTOS */
+      /* =================================================== */
+
+      setMensagem(
+        "Enviando CNH..."
+      );
+
+      const cnhUrl =
+        await uploadDocumento(
+          cnh,
+          "cnh"
+        );
+
+      setMensagem(
+        "Enviando documento do veículo..."
+      );
+
+      const documentoVeiculoUrl =
+        await uploadDocumento(
+          documentoVeiculo,
+          "documento-veiculo"
+        );
+
+      setMensagem(
+        "Enviando comprovante de endereço..."
+      );
+
+      const comprovanteEnderecoUrl =
+        await uploadDocumento(
+          comprovanteEndereco,
+          "comprovante-endereco"
+        );
+
+      /* =================================================== */
+      /* 2. CRIAÇÃO DA CONTA */
+      /* =================================================== */
+
+      setMensagem(
+        "Criando seu cadastro..."
+      );
+
+      const payload = {
+        /*
+         * A API normaliza "prestador"
+         * para o cadastro do freteiro.
+         */
+        tipo:
+          "prestador",
+
+        tipoPessoa:
+          "PF",
+
+        nome:
+          normalizarTexto(
+            form.nome
+          ),
+
+        nomeFantasia:
+          "",
+
+        cpf:
+          form.cpf.replace(
+            /\D/g,
+            ""
+          ),
+
+        email:
+          form.email
+            .trim()
+            .toLowerCase(),
+
+        celular:
+          form.celular.replace(
+            /\D/g,
+            ""
+          ),
+
+        cidade:
+          normalizarTexto(
+            form.cidade
+          ),
+
+        estado:
+          form.estado
+            .trim()
+            .toUpperCase(),
+
+        aceitaWhatsapp:
+          form.aceitaWhatsapp,
+
+        aceitaLgpd:
+          form.aceitaLgpd,
+
+        tipoVeiculo:
+          form.tipoVeiculo,
+
+        placaVeiculo:
+          form.placaVeiculo
+            .replace(
+              /[^A-Z0-9]/gi,
+              ""
+            )
+            .toUpperCase(),
+
+        documentos: {
+          cnh:
+            cnhUrl,
+
+          documentoVeiculo:
+            documentoVeiculoUrl,
+
+          comprovanteEndereco:
+            comprovanteEnderecoUrl,
+        },
+      };
+
+      const response =
+        await fetch(
+          `${API_BASE}/api/cadastro`,
+          {
+            method:
+              "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Accept:
+                "application/json",
+            },
+
+            body:
+              JSON.stringify(
+                payload
+              ),
+          }
+        );
+
+      const raw =
+        await response
+          .text()
+          .catch(
+            () => ""
+          );
+
+      let body:
+        | CadastroResponse
+        | null =
+        null;
+
+      try {
+        body =
+          raw
+            ? (JSON.parse(
+                raw
+              ) as CadastroResponse)
+            : null;
+      } catch {
+        body =
+          null;
+      }
+
+      if (
+        !response.ok
+      ) {
+        throw new Error(
+          body?.mensagem ||
+            body?.message ||
+            body?.error ||
+            body?.erro ||
+            `Não foi possível concluir o cadastro. HTTP ${response.status}.`
+        );
+      }
+
+      setMensagem(
+        ""
+      );
+
+      /* =================================================== */
+      /* 3. SUCESSO */
+      /* =================================================== */
+
+      Alert.alert(
+        "Cadastro enviado!",
+        "Seu cadastro foi recebido com sucesso. Enviamos um e-mail para você definir sua senha de acesso.",
+        [
+          {
+            text:
+              "Entendi",
+
+            onPress:
+              () =>
+                router.replace(
+                  "/"
+                ),
+          },
+        ]
+      );
+    } catch (
+      error
+    ) {
+      console.error(
+        "Erro no cadastro:",
+        error
+      );
+
+      setMensagem(
+        ""
+      );
+
+      Alert.alert(
+        "Não foi possível concluir",
+        error instanceof
+          Error
+          ? error.message
+          : "Ocorreu um erro ao enviar seu cadastro."
+      );
+    } finally {
+      setEnviando(
+        false
+      );
+    }
+  }
+
+  /* ======================================================= */
+  /* LABEL VEÍCULO */
+  /* ======================================================= */
+
+  const labelVeiculo =
+    TIPOS_VEICULO.find(
+      (
+        item
+      ) =>
+        item.value ===
+        form.tipoVeiculo
+    )?.label ||
+    "Selecione o tipo do veículo";
+
+  /* ======================================================= */
+  /* RENDER */
+  /* ======================================================= */
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }} edges={["top", "left", "right"]}>
+    <SafeAreaView
+      style={
+        styles.safeArea
+      }
+      edges={[
+        "top",
+        "left",
+        "right",
+      ]}
+    >
       <ScrollView
-        style={{ flex: 1, backgroundColor: "#fff" }}
-        contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-        contentInsetAdjustmentBehavior="automatic"
+        style={
+          styles.scroll
+        }
+        contentContainerStyle={
+          styles.scrollContent
+        }
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={
+          false
+        }
       >
-        {/* Header com Safe Area */}
-        <View style={[styles.header, { paddingTop: (insets.top ?? 0) + 8 }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
-            <Text style={styles.headerBtnText}>←</Text>
+        {/* ================================================= */}
+        {/* HEADER */}
+        {/* ================================================= */}
+
+        <View
+          style={[
+            styles.header,
+            {
+              paddingTop:
+                (insets.top ??
+                  0) +
+                4,
+            },
+          ]}
+        >
+          <TouchableOpacity
+            onPress={
+              () => {
+                if (
+                  etapa ===
+                  1
+                ) {
+                  router.back();
+
+                  return;
+                }
+
+                setMensagem(
+                  ""
+                );
+
+                setEtapa(
+                  (
+                    etapa -
+                    1
+                  ) as Etapa
+                );
+              }
+            }
+            style={
+              styles.headerButton
+            }
+            disabled={
+              enviando
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Voltar"
+          >
+            <Text
+              style={
+                styles.headerButtonText
+              }
+            >
+              ←
+            </Text>
           </TouchableOpacity>
-          <Text style={styles.brand}>
-            vou<Text style={{ color: "#000" }}>carregar</Text>
-          </Text>
-          <View style={styles.headerBtn} />
+
+          <View
+            style={
+              styles.headerCenter
+            }
+          >
+            <Text
+              style={
+                styles.brand
+              }
+            >
+              Meu Freteiro
+            </Text>
+
+            <Text
+              style={
+                styles.headerSubtitle
+              }
+            >
+              Criar conta
+            </Text>
+          </View>
+
+          <View
+            style={
+              styles.headerButton
+            }
+          />
         </View>
 
-        {/* Passos */}
-        <View style={styles.steps}>
-          {["Dados", "Documento", "Acesso"].map((t, i) => {
-            const ativo = etapa === (i + 1);
-            return (
-              <View key={t} style={[styles.step, ativo && styles.stepActive]}>
-                <Text style={[styles.stepText, ativo && styles.stepTextActive]}>{t}</Text>
-              </View>
-            );
-          })}
+        {/* ================================================= */}
+        {/* PROGRESSO */}
+        {/* ================================================= */}
+
+        <View
+          style={
+            styles.steps
+          }
+        >
+          {[
+            "Dados",
+            "Veículo",
+            "Documentos",
+            "Finalizar",
+          ].map(
+            (
+              titulo,
+              index
+            ) => {
+              const numero =
+                (index +
+                  1) as Etapa;
+
+              const ativo =
+                etapa ===
+                numero;
+
+              const concluido =
+                etapa >
+                numero;
+
+              return (
+                <View
+                  key={
+                    titulo
+                  }
+                  style={
+                    styles.stepWrapper
+                  }
+                >
+                  <View
+                    style={[
+                      styles.stepLine,
+
+                      (
+                        ativo ||
+                        concluido
+                      ) &&
+                        styles.stepLineActive,
+                    ]}
+                  />
+
+                  <Text
+                    style={[
+                      styles.stepText,
+
+                      (
+                        ativo ||
+                        concluido
+                      ) &&
+                        styles.stepTextActive,
+                    ]}
+                    numberOfLines={
+                      1
+                    }
+                  >
+                    {titulo}
+                  </Text>
+                </View>
+              );
+            }
+          )}
         </View>
 
-        {/* Etapa 1 - Dados */}
-        {etapa === 1 && (
-          <View style={{ gap: 10 }}>
-            <Text style={styles.title}>Cadastro do Caminhoneiro</Text>
+        {/* ================================================= */}
+        {/* ETAPA 1 */}
+        {/* ================================================= */}
+
+        {etapa ===
+          1 && (
+          <View
+            style={
+              styles.card
+            }
+          >
+            <Text
+              style={
+                styles.title
+              }
+            >
+              Seus dados
+            </Text>
+
+            <Text
+              style={
+                styles.description
+              }
+            >
+              Informe seus dados para criar sua conta de freteiro.
+            </Text>
+
+            <Text
+              style={
+                styles.label
+              }
+            >
+              Nome completo
+            </Text>
 
             <TextInput
-              placeholder="CPF"
-              value={form.cpf}
-              onChangeText={(v) => atualizar("cpf", formatarCpf(v))}
-              style={styles.input}
+              placeholder="Seu nome completo"
+              value={
+                form.nome
+              }
+              onChangeText={
+                (
+                  valor
+                ) =>
+                  atualizar(
+                    "nome",
+                    valor
+                  )
+              }
+              style={
+                styles.input
+              }
+              placeholderTextColor="#9ca3af"
+              editable={
+                !enviando
+              }
+              autoCapitalize="words"
+            />
+
+            <Text
+              style={
+                styles.label
+              }
+            >
+              CPF
+            </Text>
+
+            <TextInput
+              placeholder="000.000.000-00"
+              value={
+                form.cpf
+              }
+              onChangeText={
+                (
+                  valor
+                ) =>
+                  atualizar(
+                    "cpf",
+                    formatarCpf(
+                      valor
+                    )
+                  )
+              }
+              style={
+                styles.input
+              }
               placeholderTextColor="#9ca3af"
               keyboardType="number-pad"
+              maxLength={
+                14
+              }
+              editable={
+                !enviando
+              }
             />
 
-            <TextInput
-              placeholder="Nome completo"
-              value={form.nome}
-              onChangeText={(v) => atualizar("nome", v)}
-              style={styles.input}
-              placeholderTextColor="#9ca3af"
-            />
+            <Text
+              style={
+                styles.label
+              }
+            >
+              E-mail
+            </Text>
 
             <TextInput
-              placeholder="E-mail"
-              value={form.email}
-              onChangeText={(v) => atualizar("email", v)}
-              style={styles.input}
+              placeholder="seuemail@exemplo.com"
+              value={
+                form.email
+              }
+              onChangeText={
+                (
+                  valor
+                ) =>
+                  atualizar(
+                    "email",
+                    valor
+                  )
+              }
+              style={
+                styles.input
+              }
               placeholderTextColor="#9ca3af"
-              autoCapitalize="none"
               keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={
+                false
+              }
+              editable={
+                !enviando
+              }
             />
 
+            <Text
+              style={
+                styles.label
+              }
+            >
+              Celular
+            </Text>
+
             <TextInput
-              placeholder="Celular"
-              value={form.celular}
-              onChangeText={(v) => atualizar("celular", formatarCelular(v))}
-              style={styles.input}
+              placeholder="(00) 00000-0000"
+              value={
+                form.celular
+              }
+              onChangeText={
+                (
+                  valor
+                ) =>
+                  atualizar(
+                    "celular",
+                    formatarCelular(
+                      valor
+                    )
+                  )
+              }
+              style={
+                styles.input
+              }
               placeholderTextColor="#9ca3af"
               keyboardType="phone-pad"
+              maxLength={
+                15
+              }
+              editable={
+                !enviando
+              }
             />
 
-            <TextInput
-              placeholder="CEP"
-              value={form.cep}
-              onChangeText={(v) => atualizar("cep", formatarCep(v))}
-              style={styles.input}
-              placeholderTextColor="#9ca3af"
-              keyboardType="number-pad"
-            />
+            <View
+              style={
+                styles.cityRow
+              }
+            >
+              <View
+                style={
+                  styles.cityColumn
+                }
+              >
+                <Text
+                  style={
+                    styles.label
+                  }
+                >
+                  Cidade
+                </Text>
+
+                <TextInput
+                  placeholder="Sua cidade"
+                  value={
+                    form.cidade
+                  }
+                  onChangeText={
+                    (
+                      valor
+                    ) =>
+                      atualizar(
+                        "cidade",
+                        valor
+                      )
+                  }
+                  style={
+                    styles.input
+                  }
+                  placeholderTextColor="#9ca3af"
+                  autoCapitalize="words"
+                  editable={
+                    !enviando
+                  }
+                />
+              </View>
+
+              <View
+                style={
+                  styles.stateColumn
+                }
+              >
+                <Text
+                  style={
+                    styles.label
+                  }
+                >
+                  UF
+                </Text>
+
+                <TextInput
+                  placeholder="RS"
+                  value={
+                    form.estado
+                  }
+                  onChangeText={
+                    (
+                      valor
+                    ) =>
+                      atualizar(
+                        "estado",
+                        valor
+                          .replace(
+                            /[^a-zA-Z]/g,
+                            ""
+                          )
+                          .toUpperCase()
+                          .slice(
+                            0,
+                            2
+                          )
+                      )
+                  }
+                  style={[
+                    styles.input,
+                    styles.stateInput,
+                  ]}
+                  placeholderTextColor="#9ca3af"
+                  autoCapitalize="characters"
+                  maxLength={
+                    2
+                  }
+                  editable={
+                    !enviando
+                  }
+                />
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={
+                styles.checkboxRow
+              }
+              onPress={
+                () =>
+                  atualizar(
+                    "aceitaWhatsapp",
+                    !form.aceitaWhatsapp
+                  )
+              }
+              activeOpacity={
+                0.7
+              }
+              disabled={
+                enviando
+              }
+            >
+              <View
+                style={[
+                  styles.checkbox,
+
+                  form.aceitaWhatsapp &&
+                    styles.checkboxChecked,
+                ]}
+              >
+                {form.aceitaWhatsapp && (
+                  <Text
+                    style={
+                      styles.checkmark
+                    }
+                  >
+                    ✓
+                  </Text>
+                )}
+              </View>
+
+              <Text
+                style={
+                  styles.checkboxText
+                }
+              >
+                Quero receber comunicações pelo WhatsApp.
+              </Text>
+            </TouchableOpacity>
+
+            {!!mensagem && (
+              <Text
+                style={
+                  styles.errorText
+                }
+              >
+                {mensagem}
+              </Text>
+            )}
+
+            <TouchableOpacity
+              style={
+                styles.primaryButton
+              }
+              onPress={
+                avancarEtapa1
+              }
+              disabled={
+                enviando
+              }
+            >
+              <Text
+                style={
+                  styles.primaryButtonText
+                }
+              >
+                Continuar
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ================================================= */}
+        {/* ETAPA 2 */}
+        {/* ================================================= */}
+
+        {etapa ===
+          2 && (
+          <View
+            style={
+              styles.card
+            }
+          >
+            <Text
+              style={
+                styles.title
+              }
+            >
+              Seu veículo
+            </Text>
+
+            <Text
+              style={
+                styles.description
+              }
+            >
+              Informe o veículo que você utiliza para realizar seus fretes.
+            </Text>
+
+            <Text
+              style={
+                styles.label
+              }
+            >
+              Tipo de veículo
+            </Text>
+
+            <TouchableOpacity
+              style={
+                styles.select
+              }
+              onPress={
+                () =>
+                  setSeletorVeiculoAberto(
+                    true
+                  )
+              }
+              activeOpacity={
+                0.8
+              }
+              disabled={
+                enviando
+              }
+            >
+              <Text
+                style={[
+                  styles.selectText,
+
+                  !form.tipoVeiculo &&
+                    styles.selectPlaceholder,
+                ]}
+              >
+                {labelVeiculo}
+              </Text>
+
+              <Text
+                style={
+                  styles.selectArrow
+                }
+              >
+                ▾
+              </Text>
+            </TouchableOpacity>
+
+            <Text
+              style={
+                styles.label
+              }
+            >
+              Placa do veículo
+            </Text>
 
             <TextInput
-              placeholder="Rua e número"
-              value={form.rua}
-              onChangeText={(v) => atualizar("rua", v)}
-              style={styles.input}
-              placeholderTextColor="#9ca3af"
-            />
-            <TextInput
-              placeholder="Bairro"
-              value={form.bairro}
-              onChangeText={(v) => atualizar("bairro", v)}
-              style={styles.input}
-              placeholderTextColor="#9ca3af"
-            />
-            <TextInput
-              placeholder="Cidade"
-              value={form.cidade}
-              onChangeText={(v) => atualizar("cidade", v)}
-              style={styles.input}
-              placeholderTextColor="#9ca3af"
-            />
-            <TextInput
-              placeholder="Estado (UF)"
-              value={form.estado}
-              onChangeText={(v) => atualizar("estado", v)}
-              style={styles.input}
+              placeholder="ABC1D23"
+              value={
+                form.placaVeiculo
+              }
+              onChangeText={
+                (
+                  valor
+                ) =>
+                  atualizar(
+                    "placaVeiculo",
+                    formatarPlaca(
+                      valor
+                    )
+                  )
+              }
+              style={
+                styles.input
+              }
               placeholderTextColor="#9ca3af"
               autoCapitalize="characters"
-              maxLength={2}
+              autoCorrect={
+                false
+              }
+              maxLength={
+                7
+              }
+              editable={
+                !enviando
+              }
             />
 
-            <TouchableOpacity
-              style={styles.checkbox}
-              onPress={() => atualizar("aceitaWhatsapp", !form.aceitaWhatsapp)}
-              activeOpacity={0.7}
+            <Text
+              style={
+                styles.helperText
+              }
             >
-              <View style={[styles.checkBoxSquare, form.aceitaWhatsapp && styles.checkBoxSquareOn]} />
-              <Text style={styles.checkboxText}>Aceito receber comunicações via WhatsApp.</Text>
-            </TouchableOpacity>
+              Aceitamos placas no padrão antigo ou Mercosul.
+            </Text>
 
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => setEtapa(2)}>
-              <Text style={styles.primaryBtnText}>Avançar</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Etapa 2 - Documento (CNH) */}
-        {etapa === 2 && (
-          <View style={{ gap: 10 }}>
-            <Text style={styles.title}>Documento CNH</Text>
-
-            <TouchableOpacity style={styles.upload} onPress={escolherCNH} activeOpacity={0.8}>
-              <Text style={{ color: "#374151" }}>
-                {cnh ? `Selecionado: ${cnh.name || "arquivo"}` : "Selecionar CNH (imagem ou PDF)"}
+            {!!mensagem && (
+              <Text
+                style={
+                  styles.errorText
+                }
+              >
+                {mensagem}
               </Text>
-            </TouchableOpacity>
+            )}
 
-            <View style={styles.rowBetween}>
-              <TouchableOpacity onPress={() => setEtapa(1)}>
-                <Text style={{ color: "#dc2626", fontWeight: "600" }}>Voltar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => setEtapa(3)}>
-                <Text style={styles.primaryBtnText}>Avançar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {/* Etapa 3 - Senha & LGPD */}
-        {etapa === 3 && (
-          <View style={{ gap: 10 }}>
-            <Text style={styles.title}>Acesso e LGPD</Text>
-
-            <TextInput
-              placeholder="Senha"
-              value={form.senha}
-              onChangeText={(v) => atualizar("senha", v)}
-              style={styles.input}
-              placeholderTextColor="#9ca3af"
-              secureTextEntry
-              autoCapitalize="none"
-            />
-            <TextInput
-              placeholder="Confirmar senha"
-              value={form.confirmarSenha}
-              onChangeText={(v) => atualizar("confirmarSenha", v)}
-              style={styles.input}
-              placeholderTextColor="#9ca3af"
-              secureTextEntry
-              autoCapitalize="none"
-            />
-
-            <View style={styles.lgpdBox}>
-              <Text style={styles.lgpdTitle}>LGPD – Proteção de Dados Pessoais</Text>
-              <Text style={styles.lgpdText}>
-                Ao criar sua conta, você concorda que é responsável pela segurança de seus dados
-                de acesso (senha), pela veracidade das informações e pela guarda de acesso.
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={styles.checkbox}
-              onPress={() => atualizar("aceitaLgpd", !form.aceitaLgpd)}
-              activeOpacity={0.7}
+            <View
+              style={
+                styles.navigationRow
+              }
             >
-              <View style={[styles.checkBoxSquare, form.aceitaLgpd && styles.checkBoxSquareOn]} />
-              <Text style={styles.checkboxText}>
-                Li e concordo com os termos de uso e política de privacidade (LGPD).
-              </Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={
+                  styles.secondaryButton
+                }
+                onPress={
+                  () => {
+                    setMensagem(
+                      ""
+                    );
 
-            {!!mensagem && <Text style={{ textAlign: "center", color: "#111827" }}>{mensagem}</Text>}
-
-            <View style={styles.rowBetween}>
-              <TouchableOpacity onPress={() => setEtapa(2)}>
-                <Text style={{ color: "#dc2626", fontWeight: "600" }}>Voltar</Text>
+                    setEtapa(
+                      1
+                    );
+                  }
+                }
+                disabled={
+                  enviando
+                }
+              >
+                <Text
+                  style={
+                    styles.secondaryButtonText
+                  }
+                >
+                  Voltar
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.primaryBtn, !form.aceitaLgpd && { opacity: 0.6 }]}
-                onPress={enviarFormulario}
-                disabled={!form.aceitaLgpd || enviando}
+                style={[
+                  styles.primaryButton,
+                  styles.navigationPrimaryButton,
+                ]}
+                onPress={
+                  avancarEtapa2
+                }
+                disabled={
+                  enviando
+                }
               >
-                {enviando ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Criar cadastro</Text>}
+                <Text
+                  style={
+                    styles.primaryButtonText
+                  }
+                >
+                  Continuar
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* ================================================= */}
+        {/* ETAPA 3 */}
+        {/* ================================================= */}
+
+        {etapa ===
+          3 && (
+          <View
+            style={
+              styles.card
+            }
+          >
+            <Text
+              style={
+                styles.title
+              }
+            >
+              Seus documentos
+            </Text>
+
+            <Text
+              style={
+                styles.description
+              }
+            >
+              Envie os documentos necessários para análise do seu cadastro.
+            </Text>
+
+            {/* CNH */}
+
+            <Text
+              style={
+                styles.label
+              }
+            >
+              CNH
+            </Text>
+
+            <TouchableOpacity
+              style={[
+                styles.uploadButton,
+
+                cnh &&
+                  styles.uploadButtonSelected,
+              ]}
+              onPress={
+                () =>
+                  selecionarDocumento(
+                    "cnh"
+                  )
+              }
+              disabled={
+                enviando
+              }
+              activeOpacity={
+                0.8
+              }
+            >
+              <View
+                style={
+                  styles.uploadContent
+                }
+              >
+                <Text
+                  style={
+                    styles.uploadTitle
+                  }
+                >
+                  {cnh
+                    ? "CNH selecionada"
+                    : "Selecionar CNH"}
+                </Text>
+
+                <Text
+                  style={
+                    styles.uploadFileName
+                  }
+                  numberOfLines={
+                    1
+                  }
+                >
+                  {cnh
+                    ? nomeArquivo(
+                        cnh
+                      )
+                    : "PDF, JPG ou PNG"}
+                </Text>
+              </View>
+
+              <Text
+                style={
+                  styles.uploadAction
+                }
+              >
+                {cnh
+                  ? "Alterar"
+                  : "Selecionar"}
+              </Text>
+            </TouchableOpacity>
+
+            {/* DOCUMENTO VEÍCULO */}
+
+            <Text
+              style={
+                styles.label
+              }
+            >
+              Documento do veículo
+            </Text>
+
+            <TouchableOpacity
+              style={[
+                styles.uploadButton,
+
+                documentoVeiculo &&
+                  styles.uploadButtonSelected,
+              ]}
+              onPress={
+                () =>
+                  selecionarDocumento(
+                    "documentoVeiculo"
+                  )
+              }
+              disabled={
+                enviando
+              }
+              activeOpacity={
+                0.8
+              }
+            >
+              <View
+                style={
+                  styles.uploadContent
+                }
+              >
+                <Text
+                  style={
+                    styles.uploadTitle
+                  }
+                >
+                  {documentoVeiculo
+                    ? "Documento selecionado"
+                    : "Selecionar documento"}
+                </Text>
+
+                <Text
+                  style={
+                    styles.uploadFileName
+                  }
+                  numberOfLines={
+                    1
+                  }
+                >
+                  {documentoVeiculo
+                    ? nomeArquivo(
+                        documentoVeiculo
+                      )
+                    : "PDF, JPG ou PNG"}
+                </Text>
+              </View>
+
+              <Text
+                style={
+                  styles.uploadAction
+                }
+              >
+                {documentoVeiculo
+                  ? "Alterar"
+                  : "Selecionar"}
+              </Text>
+            </TouchableOpacity>
+
+            {/* COMPROVANTE */}
+
+            <Text
+              style={
+                styles.label
+              }
+            >
+              Comprovante de endereço
+            </Text>
+
+            <TouchableOpacity
+              style={[
+                styles.uploadButton,
+
+                comprovanteEndereco &&
+                  styles.uploadButtonSelected,
+              ]}
+              onPress={
+                () =>
+                  selecionarDocumento(
+                    "comprovanteEndereco"
+                  )
+              }
+              disabled={
+                enviando
+              }
+              activeOpacity={
+                0.8
+              }
+            >
+              <View
+                style={
+                  styles.uploadContent
+                }
+              >
+                <Text
+                  style={
+                    styles.uploadTitle
+                  }
+                >
+                  {comprovanteEndereco
+                    ? "Comprovante selecionado"
+                    : "Selecionar comprovante"}
+                </Text>
+
+                <Text
+                  style={
+                    styles.uploadFileName
+                  }
+                  numberOfLines={
+                    1
+                  }
+                >
+                  {comprovanteEndereco
+                    ? nomeArquivo(
+                        comprovanteEndereco
+                      )
+                    : "PDF, JPG ou PNG"}
+                </Text>
+              </View>
+
+              <Text
+                style={
+                  styles.uploadAction
+                }
+              >
+                {comprovanteEndereco
+                  ? "Alterar"
+                  : "Selecionar"}
+              </Text>
+            </TouchableOpacity>
+
+            <View
+              style={
+                styles.infoBox
+              }
+            >
+              <Text
+                style={
+                  styles.infoText
+                }
+              >
+                Formatos aceitos: PDF, JPG e PNG. Cada arquivo pode ter até {LIMITE_ARQUIVO_MB} MB.
+              </Text>
+            </View>
+
+            {!!mensagem && (
+              <Text
+                style={
+                  styles.errorText
+                }
+              >
+                {mensagem}
+              </Text>
+            )}
+
+            <View
+              style={
+                styles.navigationRow
+              }
+            >
+              <TouchableOpacity
+                style={
+                  styles.secondaryButton
+                }
+                onPress={
+                  () => {
+                    setMensagem(
+                      ""
+                    );
+
+                    setEtapa(
+                      2
+                    );
+                  }
+                }
+                disabled={
+                  enviando
+                }
+              >
+                <Text
+                  style={
+                    styles.secondaryButtonText
+                  }
+                >
+                  Voltar
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  styles.navigationPrimaryButton,
+                ]}
+                onPress={
+                  avancarEtapa3
+                }
+                disabled={
+                  enviando
+                }
+              >
+                <Text
+                  style={
+                    styles.primaryButtonText
+                  }
+                >
+                  Continuar
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* ================================================= */}
+        {/* ETAPA 4 */}
+        {/* ================================================= */}
+
+        {etapa ===
+          4 && (
+          <View
+            style={
+              styles.card
+            }
+          >
+            <Text
+              style={
+                styles.title
+              }
+            >
+              Finalizar cadastro
+            </Text>
+
+            <Text
+              style={
+                styles.description
+              }
+            >
+              Confira as informações abaixo antes de enviar seu cadastro.
+            </Text>
+
+            {/* RESUMO */}
+
+            <View
+              style={
+                styles.summaryBox
+              }
+            >
+              <ResumoLinha
+                titulo="Nome"
+                valor={
+                  normalizarTexto(
+                    form.nome
+                  )
+                }
+              />
+
+              <ResumoLinha
+                titulo="CPF"
+                valor={
+                  form.cpf
+                }
+              />
+
+              <ResumoLinha
+                titulo="E-mail"
+                valor={
+                  form.email
+                }
+              />
+
+              <ResumoLinha
+                titulo="Celular"
+                valor={
+                  form.celular
+                }
+              />
+
+              <ResumoLinha
+                titulo="Localização"
+                valor={`${normalizarTexto(
+                  form.cidade
+                )} - ${form.estado.toUpperCase()}`}
+              />
+
+              <ResumoLinha
+                titulo="Veículo"
+                valor={
+                  labelVeiculo
+                }
+              />
+
+              <ResumoLinha
+                titulo="Placa"
+                valor={
+                  form.placaVeiculo
+                }
+                ultima
+              />
+            </View>
+
+            {/* EXPLICAÇÃO */}
+
+            <View
+              style={
+                styles.noticeBox
+              }
+            >
+              <Text
+                style={
+                  styles.noticeTitle
+                }
+              >
+                Como funciona o acesso?
+              </Text>
+
+              <Text
+                style={
+                  styles.noticeText
+                }
+              >
+                Depois de enviar o cadastro, você receberá um e-mail para definir sua senha de acesso ao Meu Freteiro.
+              </Text>
+            </View>
+
+            {/* LGPD */}
+
+            <TouchableOpacity
+              style={
+                styles.checkboxRow
+              }
+              onPress={
+                () =>
+                  atualizar(
+                    "aceitaLgpd",
+                    !form.aceitaLgpd
+                  )
+              }
+              activeOpacity={
+                0.7
+              }
+              disabled={
+                enviando
+              }
+            >
+              <View
+                style={[
+                  styles.checkbox,
+
+                  form.aceitaLgpd &&
+                    styles.checkboxChecked,
+                ]}
+              >
+                {form.aceitaLgpd && (
+                  <Text
+                    style={
+                      styles.checkmark
+                    }
+                  >
+                    ✓
+                  </Text>
+                )}
+              </View>
+
+              <Text
+                style={
+                  styles.checkboxText
+                }
+              >
+                Li e concordo com os Termos de Uso e com a Política de Privacidade.
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={
+                styles.policyButton
+              }
+              onPress={
+                () =>
+                  router.push(
+                    "/politica-privacidade"
+                  )
+              }
+              disabled={
+                enviando
+              }
+            >
+              <Text
+                style={
+                  styles.policyButtonText
+                }
+              >
+                Ler Política de Privacidade
+              </Text>
+            </TouchableOpacity>
+
+            {!!mensagem && (
+              <View
+                style={
+                  styles.statusBox
+                }
+              >
+                {enviando && (
+                  <ActivityIndicator
+                    size="small"
+                    color="#FACC15"
+                  />
+                )}
+
+                <Text
+                  style={
+                    styles.statusText
+                  }
+                >
+                  {mensagem}
+                </Text>
+              </View>
+            )}
+
+            <View
+              style={
+                styles.navigationRow
+              }
+            >
+              <TouchableOpacity
+                style={
+                  styles.secondaryButton
+                }
+                onPress={
+                  () => {
+                    setMensagem(
+                      ""
+                    );
+
+                    setEtapa(
+                      3
+                    );
+                  }
+                }
+                disabled={
+                  enviando
+                }
+              >
+                <Text
+                  style={
+                    styles.secondaryButtonText
+                  }
+                >
+                  Voltar
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  styles.navigationPrimaryButton,
+
+                  (
+                    !form.aceitaLgpd ||
+                    enviando
+                  ) &&
+                    styles.disabledButton,
+                ]}
+                onPress={
+                  enviarCadastro
+                }
+                disabled={
+                  !form.aceitaLgpd ||
+                  enviando
+                }
+              >
+                {enviando ? (
+                  <ActivityIndicator
+                    color="#111827"
+                  />
+                ) : (
+                  <Text
+                    style={
+                      styles.primaryButtonText
+                    }
+                  >
+                    Enviar cadastro
+                  </Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
         )}
       </ScrollView>
+
+      {/* =================================================== */}
+      {/* MODAL TIPO VEÍCULO */}
+      {/* =================================================== */}
+
+      <Modal
+        visible={
+          seletorVeiculoAberto
+        }
+        transparent
+        animationType="fade"
+        onRequestClose={
+          () =>
+            setSeletorVeiculoAberto(
+              false
+            )
+        }
+      >
+        <View
+          style={
+            styles.modalOverlay
+          }
+        >
+          <View
+            style={
+              styles.modalCard
+            }
+          >
+            <Text
+              style={
+                styles.modalTitle
+              }
+            >
+              Tipo de veículo
+            </Text>
+
+            <Text
+              style={
+                styles.modalDescription
+              }
+            >
+              Selecione o veículo utilizado nos seus fretes.
+            </Text>
+
+            {TIPOS_VEICULO.map(
+              (
+                item
+              ) => {
+                const selecionado =
+                  form.tipoVeiculo ===
+                  item.value;
+
+                return (
+                  <TouchableOpacity
+                    key={
+                      item.value
+                    }
+                    style={[
+                      styles.vehicleOption,
+
+                      selecionado &&
+                        styles.vehicleOptionSelected,
+                    ]}
+                    onPress={
+                      () => {
+                        atualizar(
+                          "tipoVeiculo",
+                          item.value
+                        );
+
+                        setSeletorVeiculoAberto(
+                          false
+                        );
+
+                        setMensagem(
+                          ""
+                        );
+                      }
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.vehicleOptionText,
+
+                        selecionado &&
+                          styles.vehicleOptionTextSelected,
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+
+                    {selecionado && (
+                      <Text
+                        style={
+                          styles.vehicleCheck
+                        }
+                      >
+                        ✓
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              }
+            )}
+
+            <TouchableOpacity
+              style={
+                styles.modalCancelButton
+              }
+              onPress={
+                () =>
+                  setSeletorVeiculoAberto(
+                    false
+                  )
+              }
+            >
+              <Text
+                style={
+                  styles.modalCancelText
+                }
+              >
+                Cancelar
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  header: {
-    width: "100%",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#fff",
-  },
-  headerBtn: { padding: 6 },
-  headerBtnText: { fontSize: 20, color: "#4b5563" },
-  brand: { fontSize: 22, fontWeight: "800", color: "#ea580c" },
+/* ========================================================= */
+/* RESUMO */
+/* ========================================================= */
 
-  steps: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginVertical: 12,
-    gap: 8,
-  },
-  step: {
-    flex: 1,
-    borderBottomWidth: 4,
-    borderBottomColor: "#e5e7eb",
-    paddingVertical: 6,
-    alignItems: "center",
-  },
-  stepActive: { borderBottomColor: "#ea580c" },
-  stepText: { color: "#6b7280", fontWeight: "600" },
-  stepTextActive: { color: "#ea580c" },
+function ResumoLinha({
+  titulo,
+  valor,
+  ultima = false,
+}: {
+  titulo: string;
+  valor: string;
+  ultima?: boolean;
+}) {
+  return (
+    <View
+      style={[
+        styles.summaryRow,
 
-  title: { fontSize: 18, fontWeight: "800", color: "#111827", marginBottom: 6 },
+        ultima &&
+          styles.summaryRowLast,
+      ]}
+    >
+      <Text
+        style={
+          styles.summaryLabel
+        }
+      >
+        {titulo}
+      </Text>
 
-  input: {
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === "ios" ? 12 : 10,
-    color: "#111827",
-  },
+      <Text
+        style={
+          styles.summaryValue
+        }
+      >
+        {valor}
+      </Text>
+    </View>
+  );
+}
 
-  checkbox: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
-  checkBoxSquare: {
-    width: 18,
-    height: 18,
-    borderWidth: 1,
-    borderColor: "#9ca3af",
-    borderRadius: 4,
-    backgroundColor: "#fff",
-  },
-  checkBoxSquareOn: { backgroundColor: "#111827", borderColor: "#111827" },
-  checkboxText: { color: "#374151", flex: 1 },
+/* ========================================================= */
+/* ESTILOS */
+/* ========================================================= */
 
-  upload: {
-    padding: 14,
-    backgroundColor: "#f3f4f6",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 10,
-    alignItems: "center",
-  },
+const styles =
+  StyleSheet.create({
+    safeArea: {
+      flex:
+        1,
 
-  lgpdBox: { backgroundColor: "#f3f4f6", padding: 12, borderRadius: 8 },
-  lgpdTitle: { fontSize: 14, fontWeight: "700", color: "#111827", marginBottom: 4 },
-  lgpdText: { fontSize: 13, color: "#374151" },
+      backgroundColor:
+        "#ffffff",
+    },
 
-  primaryBtn: {
-    backgroundColor: "#ea580c",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    alignItems: "center",
-    alignSelf: "flex-end",
-    minWidth: 140,
-  },
-  primaryBtnText: { color: "#fff", fontWeight: "800" },
+    scroll: {
+      flex:
+        1,
 
-  rowBetween: {
-    marginTop: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-});
+      backgroundColor:
+        "#ffffff",
+    },
+
+    scrollContent: {
+      paddingBottom:
+        40,
+    },
+
+    /* HEADER */
+
+    header: {
+      width:
+        "100%",
+
+      minHeight:
+        72,
+
+      paddingHorizontal:
+        16,
+
+      paddingBottom:
+        12,
+
+      borderBottomWidth:
+        1,
+
+      borderBottomColor:
+        "#f1f5f9",
+
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "space-between",
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    headerButton: {
+      width:
+        44,
+
+      height:
+        44,
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+    },
+
+    headerButtonText: {
+      fontSize:
+        26,
+
+      color:
+        "#374151",
+    },
+
+    headerCenter: {
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+    },
+
+    brand: {
+      fontSize:
+        21,
+
+      fontWeight:
+        "900",
+
+      color:
+        "#111827",
+    },
+
+    headerSubtitle: {
+      fontSize:
+        11,
+
+      color:
+        "#6b7280",
+
+      marginTop:
+        1,
+    },
+
+    /* PASSOS */
+
+    steps: {
+      flexDirection:
+        "row",
+
+      paddingHorizontal:
+        16,
+
+      paddingTop:
+        18,
+
+      paddingBottom:
+        10,
+
+      gap:
+        7,
+    },
+
+    stepWrapper: {
+      flex:
+        1,
+    },
+
+    stepLine: {
+      width:
+        "100%",
+
+      height:
+        4,
+
+      borderRadius:
+        999,
+
+      backgroundColor:
+        "#e5e7eb",
+
+      marginBottom:
+        6,
+    },
+
+    stepLineActive: {
+      backgroundColor:
+        "#FACC15",
+    },
+
+    stepText: {
+      textAlign:
+        "center",
+
+      fontSize:
+        10,
+
+      fontWeight:
+        "600",
+
+      color:
+        "#9ca3af",
+    },
+
+    stepTextActive: {
+      color:
+        "#FACC15",
+    },
+
+    /* CARD */
+
+    card: {
+      paddingHorizontal:
+        20,
+
+      paddingTop:
+        18,
+    },
+
+    title: {
+      fontSize:
+        23,
+
+      fontWeight:
+        "900",
+
+      color:
+        "#111827",
+    },
+
+    description: {
+      marginTop:
+        6,
+
+      marginBottom:
+        18,
+
+      color:
+        "#6b7280",
+
+      fontSize:
+        14,
+
+      lineHeight:
+        20,
+    },
+
+    /* CAMPOS */
+
+    label: {
+      marginTop:
+        13,
+
+      marginBottom:
+        6,
+
+      color:
+        "#374151",
+
+      fontSize:
+        13,
+
+      fontWeight:
+        "700",
+    },
+
+    input: {
+      width:
+        "100%",
+
+      minHeight:
+        50,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#d1d5db",
+
+      borderRadius:
+        10,
+
+      paddingHorizontal:
+        14,
+
+      paddingVertical:
+        Platform.OS ===
+        "ios"
+          ? 13
+          : 10,
+
+      color:
+        "#111827",
+
+      backgroundColor:
+        "#ffffff",
+
+      fontSize:
+        14,
+    },
+
+    cityRow: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "flex-end",
+
+      gap:
+        10,
+    },
+
+    cityColumn: {
+      flex:
+        1,
+    },
+
+    stateColumn: {
+      width:
+        76,
+    },
+
+    stateInput: {
+      textAlign:
+        "center",
+    },
+
+    helperText: {
+      marginTop:
+        7,
+
+      color:
+        "#6b7280",
+
+      fontSize:
+        12,
+    },
+
+    /* SELECT */
+
+    select: {
+      width:
+        "100%",
+
+      minHeight:
+        50,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#d1d5db",
+
+      borderRadius:
+        10,
+
+      paddingHorizontal:
+        14,
+
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "space-between",
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    selectText: {
+      flex:
+        1,
+
+      color:
+        "#111827",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "500",
+    },
+
+    selectPlaceholder: {
+      color:
+        "#9ca3af",
+
+      fontWeight:
+        "400",
+    },
+
+    selectArrow: {
+      color:
+        "#6b7280",
+
+      fontSize:
+        18,
+
+      marginLeft:
+        8,
+    },
+
+    /* CHECKBOX */
+
+    checkboxRow: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "flex-start",
+
+      marginTop:
+        20,
+
+      gap:
+        10,
+    },
+
+    checkbox: {
+      width:
+        21,
+
+      height:
+        21,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#9ca3af",
+
+      borderRadius:
+        5,
+
+      backgroundColor:
+        "#ffffff",
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      marginTop:
+        1,
+    },
+
+    checkboxChecked: {
+      backgroundColor:
+        "#FACC15",
+
+      borderColor:
+        "#FACC15",
+    },
+
+    checkmark: {
+      color:
+        "#111827",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "900",
+    },
+
+    checkboxText: {
+      flex:
+        1,
+
+      color:
+        "#374151",
+
+      fontSize:
+        13,
+
+      lineHeight:
+        19,
+    },
+
+    /* UPLOAD */
+
+    uploadButton: {
+      width:
+        "100%",
+
+      minHeight:
+        68,
+
+      paddingHorizontal:
+        14,
+
+      paddingVertical:
+        12,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#d1d5db",
+
+      borderRadius:
+        10,
+
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "space-between",
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    uploadButtonSelected: {
+      borderColor:
+        "#FACC15",
+
+      backgroundColor:
+        "#FFFBEB",
+    },
+
+    uploadContent: {
+      flex:
+        1,
+
+      paddingRight:
+        12,
+    },
+
+    uploadTitle: {
+      color:
+        "#111827",
+
+      fontSize:
+        13,
+
+      fontWeight:
+        "700",
+    },
+
+    uploadFileName: {
+      color:
+        "#6b7280",
+
+      fontSize:
+        12,
+
+      marginTop:
+        4,
+    },
+
+    uploadAction: {
+      color:
+        "#FACC15",
+
+      fontSize:
+        12,
+
+      fontWeight:
+        "800",
+    },
+
+    infoBox: {
+      marginTop:
+        18,
+
+      padding:
+        13,
+
+      borderRadius:
+        10,
+
+      backgroundColor:
+        "#f8fafc",
+    },
+
+    infoText: {
+      color:
+        "#64748b",
+
+      fontSize:
+        12,
+
+      lineHeight:
+        18,
+    },
+
+    /* ERROS / STATUS */
+
+    errorText: {
+      marginTop:
+        14,
+
+      color:
+        "#dc2626",
+
+      fontSize:
+        13,
+
+      textAlign:
+        "center",
+    },
+
+    statusBox: {
+      marginTop:
+        18,
+
+      padding:
+        13,
+
+      borderRadius:
+        10,
+
+      backgroundColor:
+        "#FFFBEB",
+
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      gap:
+        9,
+    },
+
+    statusText: {
+      flexShrink:
+        1,
+
+      color:
+        "#111827",
+
+      fontSize:
+        13,
+
+      fontWeight:
+        "600",
+
+      textAlign:
+        "center",
+    },
+
+    /* BOTÕES */
+
+    primaryButton: {
+      minHeight:
+        50,
+
+      paddingHorizontal:
+        20,
+
+      borderRadius:
+        10,
+
+      backgroundColor:
+        "#FACC15",
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      marginTop:
+        22,
+    },
+
+    primaryButtonText: {
+      color:
+        "#111827",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "800",
+    },
+
+    secondaryButton: {
+      minHeight:
+        50,
+
+      paddingHorizontal:
+        18,
+
+      borderRadius:
+        10,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#d1d5db",
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    secondaryButtonText: {
+      color:
+        "#374151",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "700",
+    },
+
+    navigationRow: {
+      width:
+        "100%",
+
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      gap:
+        10,
+
+      marginTop:
+        8,
+    },
+
+    navigationPrimaryButton: {
+      flex:
+        1,
+
+      marginTop:
+        0,
+    },
+
+    disabledButton: {
+      opacity:
+        0.55,
+    },
+
+    /* RESUMO */
+
+    summaryBox: {
+      borderWidth:
+        1,
+
+      borderColor:
+        "#e5e7eb",
+
+      borderRadius:
+        12,
+
+      overflow:
+        "hidden",
+
+      backgroundColor:
+        "#ffffff",
+    },
+
+    summaryRow: {
+      paddingHorizontal:
+        14,
+
+      paddingVertical:
+        12,
+
+      borderBottomWidth:
+        1,
+
+      borderBottomColor:
+        "#f1f5f9",
+    },
+
+    summaryRowLast: {
+      borderBottomWidth:
+        0,
+    },
+
+    summaryLabel: {
+      color:
+        "#6b7280",
+
+      fontSize:
+        11,
+
+      fontWeight:
+        "600",
+    },
+
+    summaryValue: {
+      color:
+        "#111827",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "700",
+
+      marginTop:
+        3,
+    },
+
+    /* AVISO */
+
+    noticeBox: {
+      marginTop:
+        18,
+
+      padding:
+        15,
+
+      borderRadius:
+        12,
+
+      backgroundColor:
+        "#FFFBEB",
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#FDE68A",
+    },
+
+    noticeTitle: {
+      color:
+        "#111827",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "800",
+    },
+
+    noticeText: {
+      color:
+        "#374151",
+
+      fontSize:
+        13,
+
+      lineHeight:
+        19,
+
+      marginTop:
+        5,
+    },
+
+    policyButton: {
+      alignSelf:
+        "flex-start",
+
+      marginTop:
+        10,
+
+      paddingVertical:
+        5,
+    },
+
+    policyButtonText: {
+      color:
+        "#FACC15",
+
+      fontSize:
+        12,
+
+      fontWeight:
+        "700",
+
+      textDecorationLine:
+        "underline",
+    },
+
+    /* MODAL */
+
+    modalOverlay: {
+      flex:
+        1,
+
+      backgroundColor:
+        "rgba(0,0,0,0.35)",
+
+      justifyContent:
+        "center",
+
+      padding:
+        22,
+    },
+
+    modalCard: {
+      width:
+        "100%",
+
+      maxWidth:
+        480,
+
+      alignSelf:
+        "center",
+
+      backgroundColor:
+        "#ffffff",
+
+      borderRadius:
+        16,
+
+      padding:
+        18,
+    },
+
+    modalTitle: {
+      color:
+        "#111827",
+
+      fontSize:
+        20,
+
+      fontWeight:
+        "900",
+    },
+
+    modalDescription: {
+      color:
+        "#6b7280",
+
+      fontSize:
+        13,
+
+      marginTop:
+        4,
+
+      marginBottom:
+        14,
+    },
+
+    vehicleOption: {
+      minHeight:
+        48,
+
+      paddingHorizontal:
+        12,
+
+      borderBottomWidth:
+        1,
+
+      borderBottomColor:
+        "#f1f5f9",
+
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "space-between",
+    },
+
+    vehicleOptionSelected: {
+      backgroundColor:
+        "#FFFBEB",
+    },
+
+    vehicleOptionText: {
+      color:
+        "#374151",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "600",
+    },
+
+    vehicleOptionTextSelected: {
+      color:
+        "#FACC15",
+
+      fontWeight:
+        "800",
+    },
+
+    vehicleCheck: {
+      color:
+        "#FACC15",
+
+      fontSize:
+        16,
+
+      fontWeight:
+        "900",
+    },
+
+    modalCancelButton: {
+      minHeight:
+        46,
+
+      marginTop:
+        14,
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+    },
+
+    modalCancelText: {
+      color:
+        "#6b7280",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "700",
+    },
+  });

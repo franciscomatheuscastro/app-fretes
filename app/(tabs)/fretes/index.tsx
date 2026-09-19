@@ -1,1227 +1,2797 @@
 // app/(tabs)/fretes.tsx
+
 import { Ionicons } from "@expo/vector-icons";
-import { Picker } from "@react-native-picker/picker";
-import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, {
+  useCallback,
+  useMemo,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
   Pressable,
-  ScrollView,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
+
 import * as Storage from "../../../backend/lib/storage";
 
-const API_BASE = "https://app.voucarregar.com.br";
+/* =========================================================
+   CONFIGURAÇÃO
+========================================================= */
 
-/* =============== Tipos =============== */
+const API_BASE = "https://www.meufreteiro.com";
+
+const COLORS = {
+  primary: "#FACC15",
+  primarySoft: "#FEF9C3",
+  primaryBorder: "#FDE047",
+
+  black: "#111827",
+
+  background: "#F8FAFC",
+  surface: "#FFFFFF",
+
+  text: "#111827",
+  secondaryText: "#64748B",
+  mutedText: "#94A3B8",
+
+  border: "#E2E8F0",
+  borderLight: "#F1F5F9",
+
+  danger: "#B91C1C",
+  dangerBackground: "#FEF2F2",
+  dangerBorder: "#FECACA",
+};
+
+/* =========================================================
+   TIPOS
+========================================================= */
+
 type Frete = {
-  id: string | number;
-  cidadeColeta: string;     // "Cidade - UF - País"
-  cidadeEntrega: string;    // "Cidade - UF - País"
-  produto: string;
-  pesoTotal: number;
-  unidadePeso: "toneladas" | "quilos" | string;
-  valorFrete: number | null; // -1 ou null => "A combinar"
-  tipoCarga: "completa" | "complemento" | string;
-  veiculos: string[];
-  carrocerias: string[];
-  pagaPedagio?: boolean | null;
-  empresa?: { logo?: string | null } | null;
+  id: string;
+
+  cidadeColeta: string;
+  cidadeEntrega: string;
+
+  dataColeta?: string | null;
+  dataEntrega?: string | null;
+
+  descricao?: string | null;
+  observacoes?: string | null;
+
+  fotos?: string[];
+
+  pesoAproximado?: number | null;
+
+  temEscada?: string | null;
+
+  precisaAjudante?: boolean | null;
+
   createdAt?: string | null;
+
+  status?: string | null;
+  ativo?: boolean;
+
+  _count?: {
+    propostas?: number;
+  };
 };
 
-type EstadoIBGE = {
-  id: number;
-  sigla: string;
-  nome: string;
-  regiao: { id: number; sigla: string; nome: string };
-};
-type MunicipioIBGE = { id: number; nome: string };
+type RespostaFretes =
+  | Frete[]
+  | {
+      fretes?: Frete[];
+      data?: Frete[];
 
-/* =============== Helpers =============== */
-function toLowerNoAccent(v: string) {
-  return (v || "")
+      mensagem?: string;
+      message?: string;
+
+      erro?: string;
+      error?: string;
+    };
+
+type FiltroAjudante =
+  | "TODOS"
+  | "SIM"
+  | "NAO";
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function extrairMensagemErro(
+  body: any,
+  fallback: string
+) {
+  return (
+    body?.mensagem ||
+    body?.message ||
+    body?.erro ||
+    body?.error ||
+    fallback
+  );
+}
+
+function normalizarTexto(valor: string) {
+  return valor
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
-async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs = 8000) {
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { ...opts, signal: controller.signal });
-    return res;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-/** ===== Geocodificação segura + cache ===== */
-const coordenadasCache = new Map<string, { lat: number; lon: number }>();
-
-async function buscarCoordenadas(cidade: string, estado: string) {
-  const chave = `${cidade},${estado}`;
-  if (coordenadasCache.has(chave)) return coordenadasCache.get(chave)!;
-
-  const url =
-    `https://nominatim.openstreetmap.org/search?format=json&q=` +
-    encodeURIComponent(`${cidade},${estado},Brasil`);
-
-  try {
-    const headers: any = { Accept: "application/json" };
-    if (Platform.OS === "android") {
-      headers["User-Agent"] = "VouCarregarApp/1.0 (contato@voucarregar.com.br)";
-    }
-
-    const res = await fetchWithTimeout(url, { headers }, 10000);
-    if (!res.ok) return null;
-
-    const ct = (res.headers.get("content-type") || "").toLowerCase();
-    if (!ct.includes("application/json")) return null;
-
-    const data = await res.json().catch(() => null);
-    if (!Array.isArray(data) || data.length === 0) return null;
-
-    const coords = { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
-    coordenadasCache.set(chave, coords);
-    return coords;
-  } catch {
+function formatarData(
+  valor?: string | null
+) {
+  if (!valor) {
     return null;
   }
-}
 
-function haversineKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
-  const toRad = (v: number) => (v * Math.PI) / 180;
-  const R = 6371;
-  const dLat = toRad(b.lat - a.lat);
-  const dLon = toRad(b.lon - a.lon);
-  const x =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-}
+  const data = new Date(valor);
 
-/* =============== Listas =============== */
-const PAISES = ["Brasil", "Argentina", "Uruguai", "Chile"];
-const VEICULOS = [
-  "3/4", "Fiorino", "Toco", "VLC", "Bitruck", "Truck",
-  "Bitrem", "Carreta", "Carreta LS", "Rodotrem", "Vanderléia", "4º Eixo"
-];
-const CARROCERIAS = [
-  "Baú","Baú Frigorífico","Baú Refrigerado","Sider","Caçamba","Grade Baixa","Graneleiro","Plataforma","Prancha",
-  "Apenas Cavalo","Bug Porta Container","Cavaqueira","Cegonheiro","Gaiola","Hopper","Munck","Silo","Tanque",
-];
-
-/* ====== Parser da busca livre (origem) ====== */
-function parseBusca(txt: string): { cidade: string; uf: string } {
-  const clean = (txt || "").trim();
-  if (!clean) return { cidade: "", uf: "" };
-  const m = clean.match(/^(.+?)(?:,\s*([A-Za-z]{2}))?$/);
-  if (!m) return { cidade: clean, uf: "" };
-  return { cidade: (m[1] || "").trim(), uf: (m[2] || "").toUpperCase().trim() };
-}
-
-/* =============== Componentes reutilizáveis =============== */
-
-const Tag = React.memo(function Tag({
-  text, selected, onPress,
-}: { text: string; selected: boolean; onPress: () => void }) {
-  return (
-    <TouchableOpacity
-      style={[styles.tag, selected && styles.tagSelected]}
-      onPress={onPress}
-      activeOpacity={0.9}
-    >
-      <Text style={[styles.tagText, selected && styles.tagTextSelected]}>{text}</Text>
-    </TouchableOpacity>
-  );
-});
-
-/** Dropdown compacto de multiseleção (lista suspensa) */
-function MultiSelectDropdown({
-  label,
-  options,
-  selected,
-  onToggle,
-}: {
-  label: string;
-  options: string[];
-  selected: string[];
-  onToggle: (value: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selectedText =
-    selected.length === 0 ? "Nenhum selecionado" :
-    selected.length === 1 ? selected[0] :
-    `${selected.length} selecionados`;
-
-  return (
-    <View style={{ gap: 6 }}>
-      <Text style={styles.sectionTitle}>{label}</Text>
-      <TouchableOpacity
-        onPress={() => setOpen((v) => !v)}
-        activeOpacity={0.9}
-        style={styles.dropdownHeader}
-      >
-        <Text style={{ color: "#111827", fontWeight: "700" }}>{selectedText}</Text>
-        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={16} color="#111827" />
-      </TouchableOpacity>
-
-      {open && (
-        <View style={styles.dropdownBody}>
-          {options.map((opt) => {
-            const isSel = selected.includes(opt);
-            return (
-              <TouchableOpacity
-                key={opt}
-                onPress={() => onToggle(opt)}
-                style={styles.dropdownItem}
-                activeOpacity={0.85}
-              >
-                <View style={[styles.checkbox, isSel && styles.checkboxOn]}>
-                  {isSel && <Ionicons name="checkmark" size={14} color="#fff" />}
-                </View>
-                <Text style={{ color: "#111827" }}>{opt}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
-    </View>
-  );
-}
-
-type FiltrosSheetProps = {
-  visible: boolean;
-  onClose: () => void;
-
-  // dados auxiliares
-  estados: EstadoIBGE[];
-  regioes: string[];
-  cidadesOrigem: string[];
-  cidadesDestino: string[];
-
-  // ORIGEM
-  paisOrigem: string;
-  regiaoOrigem: string;
-  estadoOrigem: string;
-  cidadeOrigem: string;
-
-  // DESTINO
-  paisDestino: string;
-  regiaoDestino: string;
-  estadoDestino: string;
-  cidadeDestino: string;
-
-  // comuns
-  filtroVeiculos: string[];
-  filtroCarrocerias: string[];
-  filtroTipoCarga: "todos" | "completa" | "complemento";
-  raioKm: number | null;
-
-  // setters ORIGEM
-  setPaisOrigem: (v: string) => void;
-  setRegiaoOrigem: (v: string) => void;
-  setEstadoOrigem: (v: string) => void;
-  setCidadeOrigem: (v: string) => void;
-
-  // setters DESTINO
-  setPaisDestino: (v: string) => void;
-  setRegiaoDestino: (v: string) => void;
-  setEstadoDestino: (v: string) => void;
-  setCidadeDestino: (v: string) => void;
-
-  // setters comuns
-  setFiltroVeiculos: (v: string[]) => void;
-  setFiltroCarrocerias: (v: string[]) => void;
-  setFiltroTipoCarga: (v: "todos" | "completa" | "complemento") => void;
-  setRaioKm: (v: number | null) => void;
-
-  // ações
-  onBuscar: () => void;
-  onLimpar: () => void;
-};
-
-const FiltrosSheet = React.memo(function FiltrosSheet(props: FiltrosSheetProps) {
-  const insets = useSafeAreaInsets();
-
-  const {
-    visible, onClose,
-    estados, regioes, cidadesOrigem, cidadesDestino,
-
-    // ORIGEM
-    paisOrigem, regiaoOrigem, estadoOrigem, cidadeOrigem,
-
-    // DESTINO
-    paisDestino, regiaoDestino, estadoDestino, cidadeDestino,
-
-    // comuns
-    filtroVeiculos, filtroCarrocerias, filtroTipoCarga, raioKm,
-
-    // setters ORIGEM
-    setPaisOrigem, setRegiaoOrigem, setEstadoOrigem, setCidadeOrigem,
-
-    // setters DESTINO
-    setPaisDestino, setRegiaoDestino, setEstadoDestino, setCidadeDestino,
-
-    // setters comuns
-    setFiltroVeiculos, setFiltroCarrocerias, setFiltroTipoCarga, setRaioKm,
-
-    // ações
-    onBuscar, onLimpar,
-  } = props;
-
-  const toggle = useCallback(function toggle<T extends string>(
-    arr: T[], setArr: (v: T[]) => void, item: T
-  ) {
-    setArr(arr.includes(item) ? arr.filter((i) => i !== item) : [...arr, item]);
-  }, []);
-
-  return (
-    <Modal
-      visible={visible}
-      transparent={Platform.OS === "ios"}
-      statusBarTranslucent={Platform.OS === "android"}
-      presentationStyle={Platform.select({ ios: "overFullScreen", android: "fullScreen" }) as any}
-      animationType={Platform.select({ ios: "slide", android: "fade" })}
-      hardwareAccelerated
-      onRequestClose={onClose}
-    >
-      <View style={styles.sheetBackdrop}>
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
-
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={{ width: "100%" }}
-        >
-          <Pressable
-            onPress={() => {}}
-            onStartShouldSetResponder={() => true}
-            style={[styles.sheetBody, { paddingBottom: Math.max(insets.bottom, 16) }]}
-          >
-            <View style={styles.sheetHandle} />
-
-            <ScrollView
-              style={{ maxHeight: "100%" }}
-              contentContainerStyle={{ paddingBottom: 12, gap: 14 }}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
-              {/* ================== ORIGEM ================== */}
-              <Text style={styles.groupTitle}>Origem</Text>
-
-              {/* País (origem) */}
-              <Text style={styles.sectionTitle}>País</Text>
-              <View style={styles.wrap}>
-                {PAISES.map((p) => (
-                  <Tag
-                    key={`origem-${p}`}
-                    text={p}
-                    selected={paisOrigem === p}
-                    onPress={() => {
-                      setPaisOrigem(p);
-                      if (p !== "Brasil") {
-                        setRegiaoOrigem("");
-                        setEstadoOrigem("");
-                        setCidadeOrigem("");
-                      }
-                    }}
-                  />
-                ))}
-              </View>
-
-              {/* Região (origem) */}
-              {paisOrigem === "Brasil" && (
-                <>
-                  <Text style={styles.sectionTitle}>Região</Text>
-                  <View style={styles.wrap}>
-                    {regioes.map((r) => (
-                      <Tag
-                        key={`origem-reg-${r}`}
-                        text={r}
-                        selected={regiaoOrigem === r}
-                        onPress={() => {
-                          const next = regiaoOrigem === r ? "" : r;
-                          setRegiaoOrigem(next);
-                          setEstadoOrigem("");
-                          setCidadeOrigem("");
-                        }}
-                      />
-                    ))}
-                  </View>
-                </>
-              )}
-
-              {/* Estado (origem) */}
-              {paisOrigem === "Brasil" && !!regiaoOrigem && (
-                <>
-                  <Text style={styles.sectionTitle}>Estado</Text>
-                  <View style={styles.wrap}>
-                    {estados
-                      .filter((e) => e.regiao.nome === regiaoOrigem)
-                      .sort((a, b) => a.sigla.localeCompare(b.sigla))
-                      .map((e) => (
-                        <Tag
-                          key={`origem-uf-${e.sigla}`}
-                          text={e.sigla}
-                          selected={estadoOrigem === e.sigla}
-                          onPress={() => {
-                            const next = estadoOrigem === e.sigla ? "" : e.sigla;
-                            setEstadoOrigem(next);
-                            setCidadeOrigem("");
-                          }}
-                        />
-                      ))}
-                  </View>
-                </>
-              )}
-
-              {/* Cidade (origem) */}
-              {paisOrigem === "Brasil" && !!estadoOrigem && (
-                <>
-                  <Text style={styles.sectionTitle}>Cidade</Text>
-                  <View style={styles.picker}>
-                    <Picker
-                      selectedValue={cidadeOrigem || ""}
-                      onValueChange={(v) => setCidadeOrigem(String(v))}
-                    >
-                      <Picker.Item label="Selecione a cidade" value="" />
-                      {cidadesOrigem.map((c) => (
-                        <Picker.Item key={`origem-city-${c}`} label={c} value={c} />
-                      ))}
-                    </Picker>
-                  </View>
-                </>
-              )}
-
-              {/* ================== DESTINO ================== */}
-              <Text style={[styles.groupTitle, { marginTop: 8 }]}>Destino</Text>
-
-              {/* País (destino) */}
-              <Text style={styles.sectionTitle}>País</Text>
-              <View style={styles.wrap}>
-                {PAISES.map((p) => (
-                  <Tag
-                    key={`destino-${p}`}
-                    text={p}
-                    selected={paisDestino === p}
-                    onPress={() => {
-                      setPaisDestino(p);
-                      if (p !== "Brasil") {
-                        setRegiaoDestino("");
-                        setEstadoDestino("");
-                        setCidadeDestino("");
-                      }
-                    }}
-                  />
-                ))}
-              </View>
-
-              {/* Região (destino) */}
-              {paisDestino === "Brasil" && (
-                <>
-                  <Text style={styles.sectionTitle}>Região</Text>
-                  <View style={styles.wrap}>
-                    {regioes.map((r) => (
-                      <Tag
-                        key={`destino-reg-${r}`}
-                        text={r}
-                        selected={regiaoDestino === r}
-                        onPress={() => {
-                          const next = regiaoDestino === r ? "" : r;
-                          setRegiaoDestino(next);
-                          setEstadoDestino("");
-                          setCidadeDestino("");
-                        }}
-                      />
-                    ))}
-                  </View>
-                </>
-              )}
-
-              {/* Estado (destino) */}
-              {paisDestino === "Brasil" && !!regiaoDestino && (
-                <>
-                  <Text style={styles.sectionTitle}>Estado</Text>
-                  <View style={styles.wrap}>
-                    {estados
-                      .filter((e) => e.regiao.nome === regiaoDestino)
-                      .sort((a, b) => a.sigla.localeCompare(b.sigla))
-                      .map((e) => (
-                        <Tag
-                          key={`destino-uf-${e.sigla}`}
-                          text={e.sigla}
-                          selected={estadoDestino === e.sigla}
-                          onPress={() => {
-                            const next = estadoDestino === e.sigla ? "" : e.sigla;
-                            setEstadoDestino(next);
-                            setCidadeDestino("");
-                          }}
-                        />
-                      ))}
-                  </View>
-                </>
-              )}
-
-              {/* Cidade (destino) */}
-              {paisDestino === "Brasil" && !!estadoDestino && (
-                <>
-                  <Text style={styles.sectionTitle}>Cidade</Text>
-                  <View style={styles.picker}>
-                    <Picker
-                      selectedValue={cidadeDestino || ""}
-                      onValueChange={(v) => setCidadeDestino(String(v))}
-                    >
-                      <Picker.Item label="Selecione a cidade" value="" />
-                      {cidadesDestino.map((c) => (
-                        <Picker.Item key={`destino-city-${c}`} label={c} value={c} />
-                      ))}
-                    </Picker>
-                  </View>
-                </>
-              )}
-
-              {/* Veículos (multiselect) */}
-              <MultiSelectDropdown
-                label="Veículos"
-                options={VEICULOS}
-                selected={filtroVeiculos}
-                onToggle={(val) => toggle(filtroVeiculos, setFiltroVeiculos, val)}
-              />
-
-              {/* Carrocerias (multiselect) */}
-              <MultiSelectDropdown
-                label="Carrocerias"
-                options={CARROCERIAS}
-                selected={filtroCarrocerias}
-                onToggle={(val) => toggle(filtroCarrocerias, setFiltroCarrocerias, val)}
-              />
-
-              {/* Tipo de carga */}
-              <Text style={styles.sectionTitle}>Tipo de carga</Text>
-              <View style={styles.wrap}>
-                <Tag text="Todos"       selected={filtroTipoCarga === "todos"}       onPress={() => setFiltroTipoCarga("todos")} />
-                <Tag text="completa"    selected={filtroTipoCarga === "completa"}    onPress={() => setFiltroTipoCarga("completa")} />
-                <Tag text="complemento" selected={filtroTipoCarga === "complemento"} onPress={() => setFiltroTipoCarga("complemento")} />
-              </View>
-
-              {/* Raio (a partir da ORIGEM) */}
-              <Text style={styles.sectionTitle}>Raio (a partir da origem)</Text>
-              <View style={styles.picker}>
-                <Picker
-                  selectedValue={raioKm ?? 0}
-                  onValueChange={(v) => (v ? setRaioKm(Number(v)) : setRaioKm(null))}
-                >
-                  <Picker.Item label="Sem filtro" value={0} />
-                  <Picker.Item label="50 km"  value={50} />
-                  <Picker.Item label="100 km" value={100} />
-                  <Picker.Item label="200 km" value={200} />
-                  <Picker.Item label="300 km" value={300} />
-                </Picker>
-              </View>
-              {!!raioKm && (
-                <Text style={styles.helper}>
-                  Dica: selecione UF e cidade (ou digite “Cidade, UF” na busca) para a distância ficar precisa.
-                </Text>
-              )}
-            </ScrollView>
-
-            {/* Botões fixos */}
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <TouchableOpacity
-                style={[styles.btnPrimary, { flex: 1 }]}
-                activeOpacity={0.9}
-                onPress={onBuscar}
-              >
-                <Text style={styles.btnPrimaryText}>Buscar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btnSecondary, { flex: 1 }]}
-                activeOpacity={0.9}
-                onPress={onLimpar}
-              >
-                <Text style={styles.btnSecondaryText}>Limpar</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  );
-});
-
-/* =============== Tela =============== */
-export default function FretesScreen() {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-
-  // Dados
-  const [loading, setLoading] = useState(true);
-  const [erro, setErro] = useState("");
-  const [fretes, setFretes] = useState<Frete[]>([]);
-  const [estados, setEstados] = useState<EstadoIBGE[]>([]);
-  const [cidadesOrigem, setCidadesOrigem] = useState<string[]>([]);
-  const [cidadesDestino, setCidadesDestino] = useState<string[]>([]);
-
-  // Busca livre (origem)
-  const [inputBusca, setInputBusca] = useState("");
-  const [buscaAplicada, setBuscaAplicada] = useState("");
-
-  // Filtros estruturados — ORIGEM
-  const [paisOrigem, setPaisOrigem] = useState<string>("Brasil");
-  const [regiaoOrigem, setRegiaoOrigem] = useState<string>("");
-  const [estadoOrigem, setEstadoOrigem] = useState<string>("");
-  const [cidadeOrigem, setCidadeOrigem] = useState<string>("");
-
-  // Filtros estruturados — DESTINO
-  const [paisDestino, setPaisDestino] = useState<string>("Brasil");
-  const [regiaoDestino, setRegiaoDestino] = useState<string>("");
-  const [estadoDestino, setEstadoDestino] = useState<string>("");
-  const [cidadeDestino, setCidadeDestino] = useState<string>("");
-
-  // Comuns
-  const [filtroVeiculos, setFiltroVeiculos] = useState<string[]>([]);
-  const [filtroCarrocerias, setFiltroCarrocerias] = useState<string[]>([]);
-  const [filtroTipoCarga, setFiltroTipoCarga] = useState<"todos" | "completa" | "complemento">("todos");
-  const [raioKm, setRaioKm] = useState<number | null>(null);
-  const [coordsOrigem, setCoordsOrigem] = useState<{ lat: number; lon: number } | null>(null);
-
-  // UI
-  const [filtersSheetOpen, setFiltersSheetOpen] = useState(false);
-  const [prefetchingRaio, setPrefetchingRaio] = useState(false);
-  const [prefetchTick, setPrefetchTick] = useState(0);
-
-  // Carregamento inicial
-  const didLoadRef = useRef(false);
-  useEffect(() => {
-    if (didLoadRef.current) return;
-    didLoadRef.current = true;
-
-    (async () => {
-      try {
-        setLoading(true);
-        setErro("");
-
-        const token = await Storage.getItem("authToken");
-        const fetchFretes = async (useAuth: boolean) => {
-          const res = await fetchWithTimeout(`${API_BASE}/api/fretes/todos`, {
-            headers: {
-              Accept: "application/json",
-              ...(useAuth && token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-          }, 12000);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return (await res.json()) as Frete[];
-        };
-
-        let dados: Frete[] = [];
-        try { dados = await fetchFretes(true); } catch { dados = await fetchFretes(false); }
-        setFretes(Array.isArray(dados) ? dados : []);
-      } catch {
-        setErro("Não foi possível carregar os fretes.");
-      }
-
-      try {
-        const resUF = await fetchWithTimeout("https://servicodados.ibge.gov.br/api/v1/localidades/estados", {}, 8000);
-        const estadosJson: EstadoIBGE[] = await resUF.json();
-        setEstados(estadosJson);
-      } catch {
-        setEstados([
-          { id: 35, sigla: "SP", nome: "São Paulo", regiao: { id: 3, sigla: "SE", nome: "Sudeste" } },
-          { id: 41, sigla: "PR", nome: "Paraná",    regiao: { id: 4, sigla: "S",  nome: "Sul" } },
-          { id: 43, sigla: "RS", nome: "Rio Grande do Sul", regiao: { id: 4, sigla: "S", nome: "Sul" } },
-        ]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  // Regiões únicas
-  const regioes = useMemo(() => Array.from(new Set(estados.map((e) => e.regiao.nome))).sort(), [estados]);
-
-  // Carrega cidades da UF — ORIGEM
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (paisOrigem === "Brasil" && estadoOrigem) {
-        try {
-          const res = await fetchWithTimeout(
-            `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${estadoOrigem}/municipios`, {}, 8000
-          );
-          const data: MunicipioIBGE[] = await res.json();
-          if (!cancelled) setCidadesOrigem(data.map((m) => m.nome));
-        } catch {
-          if (!cancelled) setCidadesOrigem([]);
-        }
-      } else {
-        setCidadesOrigem([]);
-      }
-      setCidadeOrigem("");
-    })();
-    return () => { cancelled = true; };
-  }, [paisOrigem, estadoOrigem]);
-
-  // Carrega cidades da UF — DESTINO
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (paisDestino === "Brasil" && estadoDestino) {
-        try {
-          const res = await fetchWithTimeout(
-            `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${estadoDestino}/municipios`, {}, 8000
-          );
-          const data: MunicipioIBGE[] = await res.json();
-          if (!cancelled) setCidadesDestino(data.map((m) => m.nome));
-        } catch {
-          if (!cancelled) setCidadesDestino([]);
-        }
-      } else {
-        setCidadesDestino([]);
-      }
-      setCidadeDestino("");
-    })();
-    return () => { cancelled = true; };
-  }, [paisDestino, estadoDestino]);
-
-  // Coordenadas da ORIGEM para o raio (só quando houver UF)
-  useEffect(() => {
-    (async () => {
-      const parsed = parseBusca(buscaAplicada); // cidade pode vir do texto aplicado
-      const cidadeTxt = parsed.cidade || cidadeOrigem;
-      const ufTxt     = parsed.uf     || estadoOrigem;
-
-      if (paisOrigem === "Brasil" && ufTxt && cidadeTxt && raioKm) {
-        const c = await buscarCoordenadas(cidadeTxt, ufTxt);
-        setCoordsOrigem(c);
-      } else {
-        setCoordsOrigem(null);
-      }
-    })();
-  }, [paisOrigem, estadoOrigem, cidadeOrigem, buscaAplicada, raioKm]);
-
-  // Filtro base (aplicando ORIGEM + DESTINO + filtros comuns)
-  const fretesFiltradosBase = useMemo(() => {
-    const parsed = parseBusca(buscaAplicada); // "Cidade" ou "Cidade, UF"
-    const cidadeBusca = parsed.cidade || cidadeOrigem;
-    const ufBusca     = parsed.uf     || estadoOrigem;
-
-    return fretes.filter((f) => {
-      const [cidadeC, estadoC, paisC] = (f.cidadeColeta || "").split(" - ").map((s) => (s || "").trim());
-      const [cidadeE, estadoE, paisE] = (f.cidadeEntrega || "").split(" - ").map((s) => (s || "").trim());
-
-      // ===== ORIGEM =====
-      if (paisOrigem && paisC && paisC !== paisOrigem) return false;
-
-      if (paisOrigem === "Brasil" && regiaoOrigem) {
-        const estObj = estados.find((e) => e.sigla === estadoC || toLowerNoAccent(e.nome) === toLowerNoAccent(estadoC || ""));
-        if (estObj?.regiao.nome !== regiaoOrigem) return false;
-      }
-
-      if (paisOrigem === "Brasil" && ufBusca) {
-        const ok =
-          estadoC === ufBusca ||
-          toLowerNoAccent(estados.find((e) => e.sigla === ufBusca)?.nome || "") === toLowerNoAccent(estadoC || "");
-        if (!ok) return false;
-      }
-
-      if (!raioKm && cidadeBusca) {
-        if (toLowerNoAccent(cidadeC || "") !== toLowerNoAccent(cidadeBusca)) return false;
-      }
-
-      // ===== DESTINO =====
-      if (paisDestino && paisE && paisE !== paisDestino) return false;
-
-      if (paisDestino === "Brasil" && regiaoDestino) {
-        const estObjDest = estados.find((e) => e.sigla === estadoE || toLowerNoAccent(e.nome) === toLowerNoAccent(estadoE || ""));
-        if (estObjDest?.regiao.nome !== regiaoDestino) return false;
-      }
-
-      if (paisDestino === "Brasil" && estadoDestino) {
-        const okDest =
-          estadoE === estadoDestino ||
-          toLowerNoAccent(estados.find((e) => e.sigla === estadoDestino)?.nome || "") === toLowerNoAccent(estadoE || "");
-        if (!okDest) return false;
-      }
-
-      if (paisDestino === "Brasil" && cidadeDestino) {
-        if (toLowerNoAccent(cidadeE || "") !== toLowerNoAccent(cidadeDestino)) return false;
-      }
-
-      // ===== Comuns =====
-      if (filtroVeiculos.length && !filtroVeiculos.some((v) => (f.veiculos || []).includes(v))) return false;
-      if (filtroCarrocerias.length && !filtroCarrocerias.some((c) => (f.carrocerias || []).includes(c))) return false;
-
-      if (filtroTipoCarga !== "todos") {
-        const tipo = (f.tipoCarga || "").toLowerCase();
-        if (tipo !== filtroTipoCarga) return false;
-      }
-
-      return true;
-    });
-  }, [
-    fretes,
-
-    // origem
-    buscaAplicada, paisOrigem, regiaoOrigem, estadoOrigem, cidadeOrigem,
-
-    // destino
-    paisDestino, regiaoDestino, estadoDestino, cidadeDestino,
-
-    // comuns
-    filtroVeiculos, filtroCarrocerias, filtroTipoCarga, estados, raioKm
-  ]);
-
-  // Prefetch coordenadas (com throttle) para TODOS os fretes base quando houver raio
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!(paisOrigem === "Brasil" && raioKm && coordsOrigem)) return;
-
-      setPrefetchingRaio(true);
-      try {
-        const keys: string[] = [];
-        const seen = new Set<string>();
-        for (const f of fretesFiltradosBase) {
-          const [cidadeC, estadoC] = (f.cidadeColeta || "").split(" - ").map((s) => (s || "").trim());
-          const k = `${cidadeC},${estadoC}`;
-          if (cidadeC && estadoC && !seen.has(k)) {
-            seen.add(k);
-            keys.push(k);
-          }
-        }
-
-        // pega todos (com pausa p/ não tomar rate-limit)
-        for (const key of keys) {
-          if (cancelled) break;
-          if (!coordenadasCache.has(key)) {
-            const [city, uf] = key.split(",");
-            await buscarCoordenadas(city, uf);
-            await sleep(250);
-          }
-        }
-
-        if (!cancelled) setPrefetchTick((t) => t + 1);
-      } finally {
-        if (!cancelled) setPrefetchingRaio(false);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [fretesFiltradosBase, paisOrigem, raioKm, coordsOrigem]);
-
-  // Aplica RAIO (se coords de um frete ainda não carregaram, NÃO exclui — inclui provisoriamente)
-  const fretesParaListar = useMemo(() => {
-    if (!(paisOrigem === "Brasil" && raioKm && coordsOrigem)) return fretesFiltradosBase;
-    return fretesFiltradosBase.filter((f) => {
-      const [cidadeC, estadoC] = (f.cidadeColeta || "").split(" - ").map((s) => (s || "").trim());
-      if (!cidadeC || !estadoC) return false;
-      const key = `${cidadeC},${estadoC}`;
-      const coords = coordenadasCache.get(key);
-
-      // Sem coordenadas ainda? Inclui por enquanto (será reavaliado quando o prefetch terminar)
-      if (!coords) return true;
-
-      const d = haversineKm(coordsOrigem, coords);
-      return d <= (raioKm || 0);
-    });
-  }, [fretesFiltradosBase, paisOrigem, raioKm, coordsOrigem, prefetchTick]);
-
-  /* === Ações === */
-  const aplicarBusca = useCallback(() => {
-    setBuscaAplicada(inputBusca.trim());
-  }, [inputBusca]);
-
-  const limparTudo = useCallback(() => {
-    setInputBusca("");
-    setBuscaAplicada("");
-
-    // origem
-    setPaisOrigem("Brasil");
-    setRegiaoOrigem("");
-    setEstadoOrigem("");
-    setCidadeOrigem("");
-
-    // destino
-    setPaisDestino("Brasil");
-    setRegiaoDestino("");
-    setEstadoDestino("");
-    setCidadeDestino("");
-
-    // comuns
-    setFiltroVeiculos([]);
-    setFiltroCarrocerias([]);
-    setFiltroTipoCarga("todos");
-    setRaioKm(null);
-
-    setFiltersSheetOpen(false);
-  }, []);
-
-  const aplicarEBuscar = useCallback(() => {
-    aplicarBusca();
-    setFiltersSheetOpen(false);
-  }, [aplicarBusca]);
-
-  /* --------- Render de cada frete --------- */
-  const renderFrete = ({ item }: { item: Frete }) => {
-    const precoACombinar = item.valorFrete == null || item.valorFrete < 0;
-    const precoFmt =
-      !precoACombinar && item.valorFrete
-        ? item.valorFrete.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
-        : "A combinar";
-
-    const isTonelada = (item.unidadePeso || "").toLowerCase() === "toneladas";
-    const isQuilos = (item.unidadePeso || "").toLowerCase() === "quilos";
-    const pedagio = item.pagaPedagio ? " + pedágio" : "";
-
-    return (
-      <View style={styles.card}>
-        <View style={{ flex: 1 }}>
-          <View style={styles.cityRow}>
-            <Text style={styles.cityDot}>⬤</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cityStrong}>{item.cidadeColeta}</Text>
-              <Text style={styles.cityMuted}>{item.cidadeEntrega}</Text>
-            </View>
-          </View>
-
-          <View style={styles.wrap}>
-            {!!item.produto && <View style={styles.badge}><Text style={styles.badgeText}>{item.produto}</Text></View>}
-            <View style={styles.badge}><Text style={styles.badgeText}>{item.pesoTotal} {isTonelada ? "ton" : "kg"}</Text></View>
-            {!!item.tipoCarga && <View style={styles.badge}><Text style={styles.badgeText}>{item.tipoCarga}</Text></View>}
-          </View>
-
-          {item.createdAt && (
-            <Text style={styles.dateText}>Há {tempoRelativo(item.createdAt)}</Text>
-          )}
-        </View>
-
-        <View style={styles.side}>
-          {item.empresa?.logo ? (
-            <Image source={{ uri: item.empresa.logo }} style={styles.logo} resizeMode="contain" />
-          ) : null}
-
-          <View style={{ alignItems: "flex-end" }}>
-            <Text style={styles.price}>{precoFmt}</Text>
-            {!precoACombinar &&
-              (isTonelada ? (
-                <Text style={styles.perNote}>Preço por tonelada{pedagio}</Text>
-              ) : isQuilos ? (
-                item.pagaPedagio ? <Text style={styles.perNote}>Pedágio incluso</Text> : null
-              ) : null)}
-
-            <TouchableOpacity
-              style={styles.btn}
-              activeOpacity={0.85}
-              onPress={() => router.push({ pathname: "../fretes/[id]", params: { id: String(item.id) } })}
-            >
-              <Text style={styles.btnText}>Ver Frete</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  };
-
-  /* --------- Header fixo --------- */
-  const Header = (
-    <View style={{ gap: 12, paddingTop: 8, paddingBottom: 4 }}>
-      <View style={styles.searchCard}>
-        <TextInput
-          placeholder="Origem: Cidade ou Cidade, UF (ex.: Porto Alegre, RS)"
-          placeholderTextColor="#9ca3af"
-          value={inputBusca}
-          onChangeText={setInputBusca}
-          style={styles.searchInput}
-          returnKeyType="search"
-          blurOnSubmit={false}
-          autoCorrect={false}
-          onSubmitEditing={aplicarBusca}
-        />
-        <Pressable onPress={() => setFiltersSheetOpen(true)} style={styles.searchIconBtn}>
-          <Ionicons name="options-outline" size={18} color="#111827" />
-        </Pressable>
-        <Pressable onPress={aplicarBusca} style={styles.searchIconBtn}>
-          <Ionicons name="search" size={18} color="#111827" />
-        </Pressable>
-      </View>
-
-      {prefetchingRaio && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 12 }}>
-          <ActivityIndicator />
-          <Text style={{ color: "#6b7280" }}>Calculando distâncias…</Text>
-        </View>
-      )}
-    </View>
-  );
-
-  /* ===== filtros ativos? mostrar chip “limpar” ===== */
-  const hasActiveFilters =
-    (buscaAplicada?.length ?? 0) > 0 ||
-    // origem
-    paisOrigem !== "Brasil" || !!regiaoOrigem || !!estadoOrigem || !!cidadeOrigem ||
-    // destino
-    paisDestino !== "Brasil" || !!regiaoDestino || !!estadoDestino || !!cidadeDestino ||
-    // comuns
-    !!filtroVeiculos.length || !!filtroCarrocerias.length || filtroTipoCarga !== "todos" || !!raioKm;
-
-  /* =============== UI =============== */
-  if (loading) {
-    return (
-      <SafeAreaView style={[styles.center, { paddingTop: (insets.top ?? 0) + 8 }]} edges={["top", "left", "right"]}>
-        <ActivityIndicator size="large" />
-        <Text style={{ marginTop: 8 }}>Carregando fretes...</Text>
-      </SafeAreaView>
-    );
+  if (Number.isNaN(data.getTime())) {
+    return null;
   }
 
-  return (
-    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
-      {!!erro && (
-        <View style={styles.alert}>
-          <Text style={styles.alertText}>{erro}</Text>
-        </View>
-      )}
+  return new Intl.DateTimeFormat(
+    "pt-BR",
+    {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }
+  ).format(data);
+}
 
-      {Header}
+function dataParaFiltro(
+  valor?: string | null
+) {
+  if (!valor) {
+    return "";
+  }
 
-      {hasActiveFilters && (
-        <View style={{ paddingHorizontal: 12, marginBottom: 8 }}>
-          <TouchableOpacity style={styles.clearFiltersBtn} onPress={limparTudo} activeOpacity={0.9}>
-            <Ionicons name="close-circle-outline" size={16} color="#111827" />
-            <Text style={styles.clearFiltersText}>Limpar filtros</Text>
+  const data = new Date(valor);
+
+  if (Number.isNaN(data.getTime())) {
+    return "";
+  }
+
+  const dia = String(
+    data.getDate()
+  ).padStart(2, "0");
+
+  const mes = String(
+    data.getMonth() + 1
+  ).padStart(2, "0");
+
+  const ano = data.getFullYear();
+
+  return `${dia}/${mes}/${ano}`;
+}
+
+function formatarPeso(
+  peso?: number | null
+) {
+  if (
+    peso == null ||
+    !Number.isFinite(peso)
+  ) {
+    return null;
+  }
+
+  return `${peso.toLocaleString(
+    "pt-BR"
+  )} kg`;
+}
+
+function tempoRelativo(
+  iso?: string | null
+) {
+  if (!iso) {
+    return "";
+  }
+
+  const data = new Date(iso);
+
+  const agora = Date.now();
+
+  const diferenca =
+    agora - data.getTime();
+
+  if (
+    Number.isNaN(diferenca) ||
+    diferenca < 0
+  ) {
+    return "";
+  }
+
+  const minutos = Math.floor(
+    diferenca / 60_000
+  );
+
+  if (minutos < 1) {
+    return "agora";
+  }
+
+  if (minutos < 60) {
+    return `há ${minutos} min`;
+  }
+
+  const horas = Math.floor(
+    minutos / 60
+  );
+
+  if (horas < 24) {
+    return `há ${horas} ${
+      horas === 1
+        ? "hora"
+        : "horas"
+    }`;
+  }
+
+  const dias = Math.floor(
+    horas / 24
+  );
+
+  if (dias < 30) {
+    return `há ${dias} ${
+      dias === 1
+        ? "dia"
+        : "dias"
+    }`;
+  }
+
+  return formatarData(iso) || "";
+}
+
+/* =========================================================
+   TELA
+========================================================= */
+
+export default function FretesScreen() {
+  const router = useRouter();
+
+  /* =======================================================
+     FRETES RECEBIDOS DA API
+  ======================================================= */
+
+  const [
+    todosFretes,
+    setTodosFretes,
+  ] = useState<Frete[]>([]);
+
+  /* =======================================================
+     CAMPOS DOS FILTROS
+  ======================================================= */
+
+  const [
+    origem,
+    setOrigem,
+  ] = useState("");
+
+  const [
+    destino,
+    setDestino,
+  ] = useState("");
+
+  const [
+    dataColeta,
+    setDataColeta,
+  ] = useState("");
+
+  const [
+    filtroAjudante,
+    setFiltroAjudante,
+  ] =
+    useState<FiltroAjudante>(
+      "TODOS"
+    );
+
+  /* =======================================================
+     FILTROS APLICADOS
+  ======================================================= */
+
+  const [
+    filtrosAplicados,
+    setFiltrosAplicados,
+  ] = useState({
+    origem: "",
+    destino: "",
+    dataColeta: "",
+    ajudante:
+      "TODOS" as FiltroAjudante,
+  });
+
+  /* =======================================================
+     ESTADOS
+  ======================================================= */
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    refreshing,
+    setRefreshing,
+  ] = useState(false);
+
+  const [
+    erro,
+    setErro,
+  ] = useState("");
+
+  const [
+    filtrosAbertos,
+    setFiltrosAbertos,
+  ] = useState(false);
+
+  /* =======================================================
+     CARREGAR TODOS OS FRETES
+  ======================================================= */
+
+  const carregarFretes =
+    useCallback(
+      async (
+        silencioso = false
+      ) => {
+        try {
+          setErro("");
+
+          if (!silencioso) {
+            setLoading(true);
+          }
+
+          const token =
+            await Storage.getItem(
+              "authToken"
+            );
+
+          if (!token) {
+            setTodosFretes([]);
+
+            setErro(
+              "Sua sessão expirou. Entre novamente."
+            );
+
+            return;
+          }
+
+          /*
+           * IMPORTANTE:
+           *
+           * Agora chamamos a API SEM exigir origem.
+           *
+           * A API deve retornar todos os fretes
+           * ativos quando não houver parâmetros.
+           */
+          const response =
+            await fetch(
+              `${API_BASE}/api/fretes/buscar`,
+              {
+                method: "GET",
+
+                headers: {
+                  Accept:
+                    "application/json",
+
+                  Authorization:
+                    `Bearer ${token}`,
+                },
+              }
+            );
+
+          const raw =
+            await response
+              .text()
+              .catch(() => "");
+
+          let body:
+            | RespostaFretes
+            | null = null;
+
+          try {
+            body = raw
+              ? JSON.parse(raw)
+              : null;
+          } catch {
+            body = null;
+          }
+
+          if (
+            response.status === 401
+          ) {
+            setTodosFretes([]);
+
+            setErro(
+              "Sua sessão expirou. Faça login novamente."
+            );
+
+            return;
+          }
+
+          if (
+            response.status === 403
+          ) {
+            setTodosFretes([]);
+
+            setErro(
+              "Seu usuário não possui acesso aos fretes."
+            );
+
+            return;
+          }
+
+          if (!response.ok) {
+            throw new Error(
+              extrairMensagemErro(
+                body,
+                `Não foi possível carregar os fretes. HTTP ${response.status}.`
+              )
+            );
+          }
+
+          let lista: Frete[] = [];
+
+          if (Array.isArray(body)) {
+            lista = body;
+          } else if (
+            Array.isArray(
+              body?.fretes
+            )
+          ) {
+            lista = body.fretes;
+          } else if (
+            Array.isArray(
+              body?.data
+            )
+          ) {
+            lista = body.data;
+          }
+
+          setTodosFretes(lista);
+        } catch (error) {
+          console.error(
+            "Erro ao carregar fretes:",
+            error
+          );
+
+          setTodosFretes([]);
+
+          setErro(
+            error instanceof Error
+              ? error.message
+              : "Não foi possível carregar os fretes."
+          );
+        } finally {
+          setLoading(false);
+
+          setRefreshing(false);
+        }
+      },
+      []
+    );
+
+  /* =======================================================
+     CARREGAR AO ENTRAR / VOLTAR PARA ABA
+  ======================================================= */
+
+  useFocusEffect(
+    useCallback(() => {
+      carregarFretes(
+        todosFretes.length > 0
+      );
+    }, [
+      carregarFretes,
+      todosFretes.length,
+    ])
+  );
+
+  /* =======================================================
+     FILTRAR LOCALMENTE
+  ======================================================= */
+
+  const fretesFiltrados =
+    useMemo(() => {
+      const origemFiltro =
+        normalizarTexto(
+          filtrosAplicados.origem
+        );
+
+      const destinoFiltro =
+        normalizarTexto(
+          filtrosAplicados.destino
+        );
+
+      const dataFiltro =
+        filtrosAplicados.dataColeta.trim();
+
+      return todosFretes.filter(
+        frete => {
+          /* ORIGEM */
+
+          if (origemFiltro) {
+            const cidade =
+              normalizarTexto(
+                frete.cidadeColeta
+              );
+
+            if (
+              !cidade.includes(
+                origemFiltro
+              )
+            ) {
+              return false;
+            }
+          }
+
+          /* DESTINO */
+
+          if (destinoFiltro) {
+            const cidade =
+              normalizarTexto(
+                frete.cidadeEntrega
+              );
+
+            if (
+              !cidade.includes(
+                destinoFiltro
+              )
+            ) {
+              return false;
+            }
+          }
+
+          /* DATA */
+
+          if (dataFiltro) {
+            const data =
+              dataParaFiltro(
+                frete.dataColeta
+              );
+
+            if (
+              !data.includes(
+                dataFiltro
+              )
+            ) {
+              return false;
+            }
+          }
+
+          /* AJUDANTE */
+
+          if (
+            filtrosAplicados.ajudante ===
+              "SIM" &&
+            frete.precisaAjudante !==
+              true
+          ) {
+            return false;
+          }
+
+          if (
+            filtrosAplicados.ajudante ===
+              "NAO" &&
+            frete.precisaAjudante ===
+              true
+          ) {
+            return false;
+          }
+
+          return true;
+        }
+      );
+    }, [
+      todosFretes,
+      filtrosAplicados,
+    ]);
+
+  /* =======================================================
+     QUANTIDADE DE FILTROS
+  ======================================================= */
+
+  const quantidadeFiltros =
+    useMemo(() => {
+      let quantidade = 0;
+
+      if (
+        filtrosAplicados.origem
+      ) {
+        quantidade++;
+      }
+
+      if (
+        filtrosAplicados.destino
+      ) {
+        quantidade++;
+      }
+
+      if (
+        filtrosAplicados.dataColeta
+      ) {
+        quantidade++;
+      }
+
+      if (
+        filtrosAplicados.ajudante !==
+        "TODOS"
+      ) {
+        quantidade++;
+      }
+
+      return quantidade;
+    }, [filtrosAplicados]);
+
+  /* =======================================================
+     APLICAR FILTROS
+  ======================================================= */
+
+  function aplicarFiltros() {
+    setFiltrosAplicados({
+      origem: origem.trim(),
+
+      destino: destino.trim(),
+
+      dataColeta:
+        dataColeta.trim(),
+
+      ajudante:
+        filtroAjudante,
+    });
+
+    setFiltrosAbertos(false);
+  }
+
+  /* =======================================================
+     LIMPAR FILTROS
+  ======================================================= */
+
+  function limparFiltros() {
+    setOrigem("");
+
+    setDestino("");
+
+    setDataColeta("");
+
+    setFiltroAjudante(
+      "TODOS"
+    );
+
+    setFiltrosAplicados({
+      origem: "",
+      destino: "",
+      dataColeta: "",
+      ajudante: "TODOS",
+    });
+  }
+
+  /* =======================================================
+     REFRESH
+  ======================================================= */
+
+  const atualizar =
+    useCallback(() => {
+      setRefreshing(true);
+
+      carregarFretes(true);
+    }, [carregarFretes]);
+
+  /* =======================================================
+     ABRIR FRETE
+  ======================================================= */
+
+  function abrirFrete(
+    id: string
+  ) {
+    router.push({
+      pathname:
+        "/(tabs)/fretes/[id]",
+
+      params: {
+        id: String(id),
+      },
+    });
+  }
+
+  /* =======================================================
+     CARD
+  ======================================================= */
+
+  const renderFrete =
+    useCallback(
+      ({
+        item,
+      }: {
+        item: Frete;
+      }) => {
+        const dataColetaFormatada =
+          formatarData(
+            item.dataColeta
+          );
+
+        const dataEntrega =
+          formatarData(
+            item.dataEntrega
+          );
+
+        const peso =
+          formatarPeso(
+            item.pesoAproximado
+          );
+
+        const propostas =
+          item._count?.propostas ??
+          0;
+
+        return (
+          <TouchableOpacity
+            style={styles.card}
+            activeOpacity={0.85}
+            onPress={() =>
+              abrirFrete(item.id)
+            }
+          >
+            {/* ROTA */}
+
+            <View
+              style={
+                styles.routeArea
+              }
+            >
+              <View
+                style={
+                  styles.routeTimeline
+                }
+              >
+                <View
+                  style={
+                    styles.originDot
+                  }
+                />
+
+                <View
+                  style={
+                    styles.routeLine
+                  }
+                />
+
+                <View
+                  style={
+                    styles.destinationDot
+                  }
+                />
+              </View>
+
+              <View
+                style={
+                  styles.routeTextArea
+                }
+              >
+                <View>
+                  <Text
+                    style={
+                      styles.routeLabel
+                    }
+                  >
+                    COLETA
+                  </Text>
+
+                  <Text
+                    style={styles.city}
+                    numberOfLines={2}
+                  >
+                    {
+                      item.cidadeColeta
+                    }
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.destinationArea
+                  }
+                >
+                  <Text
+                    style={
+                      styles.routeLabel
+                    }
+                  >
+                    ENTREGA
+                  </Text>
+
+                  <Text
+                    style={styles.city}
+                    numberOfLines={2}
+                  >
+                    {
+                      item.cidadeEntrega
+                    }
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* DESCRIÇÃO */}
+
+            {!!item.descricao && (
+              <Text
+                style={
+                  styles.description
+                }
+                numberOfLines={2}
+              >
+                {item.descricao}
+              </Text>
+            )}
+
+            {/* INFORMAÇÕES */}
+
+            <View
+              style={
+                styles.infoRow
+              }
+            >
+              {peso && (
+                <View
+                  style={
+                    styles.infoChip
+                  }
+                >
+                  <Ionicons
+                    name="cube-outline"
+                    size={15}
+                    color={
+                      COLORS.secondaryText
+                    }
+                  />
+
+                  <Text
+                    style={
+                      styles.infoChipText
+                    }
+                  >
+                    {peso}
+                  </Text>
+                </View>
+              )}
+
+              {dataColetaFormatada && (
+                <View
+                  style={
+                    styles.infoChip
+                  }
+                >
+                  <Ionicons
+                    name="calendar-outline"
+                    size={15}
+                    color={
+                      COLORS.secondaryText
+                    }
+                  />
+
+                  <Text
+                    style={
+                      styles.infoChipText
+                    }
+                  >
+                    {
+                      dataColetaFormatada
+                    }
+                  </Text>
+                </View>
+              )}
+
+              {item.precisaAjudante ===
+                true && (
+                <View
+                  style={
+                    styles.infoChip
+                  }
+                >
+                  <Ionicons
+                    name="people-outline"
+                    size={15}
+                    color={
+                      COLORS.secondaryText
+                    }
+                  />
+
+                  <Text
+                    style={
+                      styles.infoChipText
+                    }
+                  >
+                    Precisa de ajudante
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* ENTREGA */}
+
+            {dataEntrega && (
+              <View
+                style={
+                  styles.deliveryRow
+                }
+              >
+                <Ionicons
+                  name="flag-outline"
+                  size={14}
+                  color={
+                    COLORS.secondaryText
+                  }
+                />
+
+                <Text
+                  style={
+                    styles.deliveryText
+                  }
+                >
+                  Previsão de
+                  entrega:{" "}
+                  {dataEntrega}
+                </Text>
+              </View>
+            )}
+
+            {/* FOOTER */}
+
+            <View
+              style={
+                styles.cardFooter
+              }
+            >
+              <View
+                style={
+                  styles.footerLeft
+                }
+              >
+                {!!item.createdAt && (
+                  <Text
+                    style={
+                      styles.createdAt
+                    }
+                  >
+                    {tempoRelativo(
+                      item.createdAt
+                    )}
+                  </Text>
+                )}
+
+                <View
+                  style={
+                    styles.proposalInfo
+                  }
+                >
+                  <Ionicons
+                    name="document-text-outline"
+                    size={14}
+                    color={
+                      COLORS.secondaryText
+                    }
+                  />
+
+                  <Text
+                    style={
+                      styles.proposalText
+                    }
+                  >
+                    {propostas}{" "}
+                    {propostas === 1
+                      ? "proposta"
+                      : "propostas"}
+                  </Text>
+                </View>
+              </View>
+
+              <View
+                style={
+                  styles.viewButton
+                }
+              >
+                <Text
+                  style={
+                    styles.viewButtonText
+                  }
+                >
+                  Ver frete
+                </Text>
+
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
+                  color="#FFFFFF"
+                />
+              </View>
+            </View>
           </TouchableOpacity>
+        );
+      },
+      []
+    );
+
+  /* =======================================================
+     HEADER DA LISTA
+  ======================================================= */
+
+  const ListHeader = (
+    <View>
+      {/* APRESENTAÇÃO */}
+
+      <View style={styles.hero}>
+        <View
+          style={styles.heroIcon}
+        >
+          <Ionicons
+            name="car-outline"
+            size={23}
+            color={COLORS.black}
+          />
+        </View>
+
+        <View
+          style={
+            styles.heroTextArea
+          }
+        >
+          <Text
+            style={
+              styles.heroTitle
+            }
+          >
+            Fretes disponíveis
+          </Text>
+
+          <Text
+            style={
+              styles.heroSubtitle
+            }
+          >
+            Veja todas as oportunidades
+            ou use os filtros para
+            encontrar o frete ideal para
+            sua rota.
+          </Text>
+        </View>
+      </View>
+
+      {/* BOTÃO FILTROS */}
+
+      <View
+        style={
+          styles.filterBar
+        }
+      >
+        <View>
+          <Text
+            style={
+              styles.resultsTitle
+            }
+          >
+            Oportunidades
+          </Text>
+
+          <Text
+            style={
+              styles.resultsCount
+            }
+          >
+            {fretesFiltrados.length}{" "}
+            {fretesFiltrados.length ===
+            1
+              ? "frete disponível"
+              : "fretes disponíveis"}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+
+            quantidadeFiltros > 0 &&
+              styles.filterButtonActive,
+          ]}
+          onPress={() =>
+            setFiltrosAbertos(
+              atual => !atual
+            )
+          }
+          activeOpacity={0.85}
+        >
+          <Ionicons
+            name="options-outline"
+            size={18}
+            color={
+              COLORS.black
+            }
+          />
+
+          <Text
+            style={
+              styles.filterButtonText
+            }
+          >
+            Filtros
+          </Text>
+
+          {quantidadeFiltros >
+            0 && (
+            <View
+              style={
+                styles.filterBadge
+              }
+            >
+              <Text
+                style={
+                  styles.filterBadgeText
+                }
+              >
+                {
+                  quantidadeFiltros
+                }
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* FILTROS */}
+
+      {filtrosAbertos && (
+        <View
+          style={
+            styles.searchBox
+          }
+        >
+          <View
+            style={
+              styles.filterHeader
+            }
+          >
+            <View>
+              <Text
+                style={
+                  styles.filterTitle
+                }
+              >
+                Filtrar fretes
+              </Text>
+
+              <Text
+                style={
+                  styles.filterSubtitle
+                }
+              >
+                Preencha somente o que
+                quiser filtrar.
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={() =>
+                setFiltrosAbertos(
+                  false
+                )
+              }
+              hitSlop={10}
+            >
+              <Ionicons
+                name="close"
+                size={22}
+                color={
+                  COLORS.secondaryText
+                }
+              />
+            </Pressable>
+          </View>
+
+          {/* ORIGEM */}
+
+          <Text
+            style={
+              styles.inputLabel
+            }
+          >
+            Origem
+          </Text>
+
+          <View
+            style={
+              styles.inputWrapper
+            }
+          >
+            <Ionicons
+              name="location-outline"
+              size={20}
+              color={
+                COLORS.secondaryText
+              }
+            />
+
+            <TextInput
+              value={origem}
+              onChangeText={
+                setOrigem
+              }
+              placeholder="Ex.: Porto Alegre"
+              placeholderTextColor={
+                COLORS.mutedText
+              }
+              style={styles.input}
+              autoCorrect={false}
+              autoCapitalize="words"
+            />
+
+            {!!origem && (
+              <Pressable
+                onPress={() =>
+                  setOrigem("")
+                }
+                hitSlop={10}
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={19}
+                  color={
+                    COLORS.mutedText
+                  }
+                />
+              </Pressable>
+            )}
+          </View>
+
+          {/* DESTINO */}
+
+          <Text
+            style={[
+              styles.inputLabel,
+              styles.fieldSpacing,
+            ]}
+          >
+            Destino
+          </Text>
+
+          <View
+            style={
+              styles.inputWrapper
+            }
+          >
+            <Ionicons
+              name="flag-outline"
+              size={20}
+              color={
+                COLORS.secondaryText
+              }
+            />
+
+            <TextInput
+              value={destino}
+              onChangeText={
+                setDestino
+              }
+              placeholder="Ex.: Curitiba"
+              placeholderTextColor={
+                COLORS.mutedText
+              }
+              style={styles.input}
+              autoCorrect={false}
+              autoCapitalize="words"
+            />
+
+            {!!destino && (
+              <Pressable
+                onPress={() =>
+                  setDestino("")
+                }
+                hitSlop={10}
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={19}
+                  color={
+                    COLORS.mutedText
+                  }
+                />
+              </Pressable>
+            )}
+          </View>
+
+          {/* DATA */}
+
+          <Text
+            style={[
+              styles.inputLabel,
+              styles.fieldSpacing,
+            ]}
+          >
+            Data de coleta
+          </Text>
+
+          <View
+            style={
+              styles.inputWrapper
+            }
+          >
+            <Ionicons
+              name="calendar-outline"
+              size={20}
+              color={
+                COLORS.secondaryText
+              }
+            />
+
+            <TextInput
+              value={dataColeta}
+              onChangeText={
+                setDataColeta
+              }
+              placeholder="DD/MM/AAAA"
+              placeholderTextColor={
+                COLORS.mutedText
+              }
+              style={styles.input}
+              keyboardType="numbers-and-punctuation"
+            />
+
+            {!!dataColeta && (
+              <Pressable
+                onPress={() =>
+                  setDataColeta("")
+                }
+                hitSlop={10}
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={19}
+                  color={
+                    COLORS.mutedText
+                  }
+                />
+              </Pressable>
+            )}
+          </View>
+
+          {/* AJUDANTE */}
+
+          <Text
+            style={[
+              styles.inputLabel,
+              styles.fieldSpacing,
+            ]}
+          >
+            Ajudante
+          </Text>
+
+          <View
+            style={
+              styles.optionRow
+            }
+          >
+            <TouchableOpacity
+              style={[
+                styles.optionButton,
+
+                filtroAjudante ===
+                  "TODOS" &&
+                  styles.optionButtonActive,
+              ]}
+              onPress={() =>
+                setFiltroAjudante(
+                  "TODOS"
+                )
+              }
+            >
+              <Text
+                style={[
+                  styles.optionText,
+
+                  filtroAjudante ===
+                    "TODOS" &&
+                    styles.optionTextActive,
+                ]}
+              >
+                Todos
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.optionButton,
+
+                filtroAjudante ===
+                  "SIM" &&
+                  styles.optionButtonActive,
+              ]}
+              onPress={() =>
+                setFiltroAjudante(
+                  "SIM"
+                )
+              }
+            >
+              <Text
+                style={[
+                  styles.optionText,
+
+                  filtroAjudante ===
+                    "SIM" &&
+                    styles.optionTextActive,
+                ]}
+              >
+                Precisa
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.optionButton,
+
+                filtroAjudante ===
+                  "NAO" &&
+                  styles.optionButtonActive,
+              ]}
+              onPress={() =>
+                setFiltroAjudante(
+                  "NAO"
+                )
+              }
+            >
+              <Text
+                style={[
+                  styles.optionText,
+
+                  filtroAjudante ===
+                    "NAO" &&
+                    styles.optionTextActive,
+                ]}
+              >
+                Não precisa
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* AÇÕES */}
+
+          <TouchableOpacity
+            style={
+              styles.searchButton
+            }
+            onPress={
+              aplicarFiltros
+            }
+            activeOpacity={0.85}
+          >
+            <Ionicons
+              name="search"
+              size={18}
+              color={
+                COLORS.black
+              }
+            />
+
+            <Text
+              style={
+                styles.searchButtonText
+              }
+            >
+              Filtrar fretes
+            </Text>
+          </TouchableOpacity>
+
+          {quantidadeFiltros >
+            0 && (
+            <TouchableOpacity
+              style={
+                styles.clearButton
+              }
+              onPress={
+                limparFiltros
+              }
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name="refresh-outline"
+                size={17}
+                color={
+                  COLORS.secondaryText
+                }
+              />
+
+              <Text
+                style={
+                  styles.clearButtonText
+                }
+              >
+                Limpar filtros
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
-      <FlatList
-        data={fretesParaListar}
-        keyExtractor={(item) => String(item.id)}
-        contentContainerStyle={{ paddingBottom: 16 }}
-        renderItem={renderFrete}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="always"
-        keyboardDismissMode="on-drag"
-        removeClippedSubviews={false}
-      />
+      {/* FILTROS ATIVOS */}
 
-      {/* Modal de Filtros */}
-      <FiltrosSheet
-        visible={filtersSheetOpen}
-        onClose={() => setFiltersSheetOpen(false)}
-        estados={estados}
-        regioes={regioes}
-        cidadesOrigem={cidadesOrigem}
-        cidadesDestino={cidadesDestino}
-        // origem
-        paisOrigem={paisOrigem}
-        regiaoOrigem={regiaoOrigem}
-        estadoOrigem={estadoOrigem}
-        cidadeOrigem={cidadeOrigem}
-        // destino
-        paisDestino={paisDestino}
-        regiaoDestino={regiaoDestino}
-        estadoDestino={estadoDestino}
-        cidadeDestino={cidadeDestino}
-        // comuns
-        filtroVeiculos={filtroVeiculos}
-        filtroCarrocerias={filtroCarrocerias}
-        filtroTipoCarga={filtroTipoCarga}
-        raioKm={raioKm}
-        // setters
-        setPaisOrigem={setPaisOrigem}
-        setRegiaoOrigem={setRegiaoOrigem}
-        setEstadoOrigem={setEstadoOrigem}
-        setCidadeOrigem={setCidadeOrigem}
-        setPaisDestino={setPaisDestino}
-        setRegiaoDestino={setRegiaoDestino}
-        setEstadoDestino={setEstadoDestino}
-        setCidadeDestino={setCidadeDestino}
-        setFiltroVeiculos={setFiltroVeiculos}
-        setFiltroCarrocerias={setFiltroCarrocerias}
-        setFiltroTipoCarga={setFiltroTipoCarga}
-        setRaioKm={setRaioKm}
-        onBuscar={aplicarEBuscar}
-        onLimpar={limparTudo}
-      />
+      {quantidadeFiltros >
+        0 && (
+        <View
+          style={
+            styles.activeFilters
+          }
+        >
+          <View
+            style={
+              styles.activeFilterHeader
+            }
+          >
+            <Text
+              style={
+                styles.activeFilterTitle
+              }
+            >
+              Filtros ativos
+            </Text>
+
+            <TouchableOpacity
+              onPress={
+                limparFiltros
+              }
+            >
+              <Text
+                style={
+                  styles.clearText
+                }
+              >
+                Limpar
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View
+            style={
+              styles.activeFilterChips
+            }
+          >
+            {!!filtrosAplicados.origem && (
+              <View
+                style={
+                  styles.activeChip
+                }
+              >
+                <Ionicons
+                  name="location-outline"
+                  size={13}
+                  color={
+                    COLORS.black
+                  }
+                />
+
+                <Text
+                  style={
+                    styles.activeChipText
+                  }
+                >
+                  {
+                    filtrosAplicados.origem
+                  }
+                </Text>
+              </View>
+            )}
+
+            {!!filtrosAplicados.destino && (
+              <View
+                style={
+                  styles.activeChip
+                }
+              >
+                <Ionicons
+                  name="flag-outline"
+                  size={13}
+                  color={
+                    COLORS.black
+                  }
+                />
+
+                <Text
+                  style={
+                    styles.activeChipText
+                  }
+                >
+                  {
+                    filtrosAplicados.destino
+                  }
+                </Text>
+              </View>
+            )}
+
+            {!!filtrosAplicados.dataColeta && (
+              <View
+                style={
+                  styles.activeChip
+                }
+              >
+                <Ionicons
+                  name="calendar-outline"
+                  size={13}
+                  color={
+                    COLORS.black
+                  }
+                />
+
+                <Text
+                  style={
+                    styles.activeChipText
+                  }
+                >
+                  {
+                    filtrosAplicados.dataColeta
+                  }
+                </Text>
+              </View>
+            )}
+
+            {filtrosAplicados.ajudante !==
+              "TODOS" && (
+              <View
+                style={
+                  styles.activeChip
+                }
+              >
+                <Ionicons
+                  name="people-outline"
+                  size={13}
+                  color={
+                    COLORS.black
+                  }
+                />
+
+                <Text
+                  style={
+                    styles.activeChipText
+                  }
+                >
+                  {filtrosAplicados.ajudante ===
+                  "SIM"
+                    ? "Precisa de ajudante"
+                    : "Sem ajudante"}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+
+      {/* ERRO */}
+
+      {!!erro && (
+        <View
+          style={
+            styles.errorBox
+          }
+        >
+          <Ionicons
+            name="alert-circle-outline"
+            size={20}
+            color={
+              COLORS.danger
+            }
+          />
+
+          <Text
+            style={
+              styles.errorText
+            }
+          >
+            {erro}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+
+  /* =======================================================
+     EMPTY
+  ======================================================= */
+
+  const EmptyComponent =
+    !loading &&
+    !erro ? (
+      <View
+        style={styles.empty}
+      >
+        <View
+          style={
+            styles.emptyIcon
+          }
+        >
+          <Ionicons
+            name="file-tray-outline"
+            size={32}
+            color={
+              COLORS.secondaryText
+            }
+          />
+        </View>
+
+        <Text
+          style={
+            styles.emptyTitle
+          }
+        >
+          {quantidadeFiltros >
+          0
+            ? "Nenhum frete encontrado"
+            : "Nenhum frete disponível"}
+        </Text>
+
+        <Text
+          style={
+            styles.emptyText
+          }
+        >
+          {quantidadeFiltros >
+          0
+            ? "Não encontramos oportunidades com esses filtros. Tente alterar ou limpar os filtros."
+            : "Ainda não existem fretes disponíveis. Puxe a tela para baixo para atualizar."}
+        </Text>
+
+        {quantidadeFiltros >
+          0 && (
+          <TouchableOpacity
+            style={
+              styles.emptyClearButton
+            }
+            onPress={
+              limparFiltros
+            }
+          >
+            <Text
+              style={
+                styles.emptyClearText
+              }
+            >
+              Ver todos os fretes
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    ) : null;
+
+  /* =======================================================
+     UI
+  ======================================================= */
+
+  return (
+    <SafeAreaView
+      style={styles.safe}
+      edges={[
+        "top",
+        "left",
+        "right",
+      ]}
+    >
+      {/* TOP BAR */}
+
+      <View
+        style={styles.topBar}
+      >
+        <View>
+          <Text
+            style={styles.brand}
+          >
+            Meu Freteiro
+          </Text>
+
+          <Text
+            style={
+              styles.topSubtitle
+            }
+          >
+            Encontre oportunidades
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={
+            styles.notificationButton
+          }
+          activeOpacity={0.8}
+          onPress={() =>
+            router.push(
+              "/(tabs)/notificacoes"
+            )
+          }
+        >
+          <Ionicons
+            name="notifications-outline"
+            size={23}
+            color={COLORS.black}
+          />
+        </TouchableOpacity>
+      </View>
+
+      {/* LOADING INICIAL */}
+
+      {loading ? (
+        <View
+          style={
+            styles.loadingContainer
+          }
+        >
+          <ActivityIndicator
+            size="large"
+            color={
+              COLORS.primary
+            }
+          />
+
+          <Text
+            style={
+              styles.loadingText
+            }
+          >
+            Carregando fretes...
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={
+            fretesFiltrados
+          }
+          keyExtractor={item =>
+            String(item.id)
+          }
+          renderItem={
+            renderFrete
+          }
+          ListHeaderComponent={
+            ListHeader
+          }
+          ListEmptyComponent={
+            EmptyComponent
+          }
+          contentContainerStyle={
+            styles.listContent
+          }
+          showsVerticalScrollIndicator={
+            false
+          }
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={
+                refreshing
+              }
+              onRefresh={
+                atualizar
+              }
+              tintColor={
+                COLORS.primary
+              }
+            />
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
 
-/* ===== util de data “Há X horas/dias” ===== */
-function tempoRelativo(iso?: string | null) {
-  if (!iso) return "";
-  const ms = Date.now() - new Date(iso).getTime();
-  const h = Math.floor(ms / 3_600_000);
-  if (h < 24) return `${h} hora${h === 1 ? "" : "s"}`;
-  const d = Math.floor(h / 24);
-  return `${d} dia${d === 1 ? "" : "s"}`;
-}
+/* =========================================================
+   ESTILOS
+========================================================= */
 
-/* =============== Estilos =============== */
-const styles = StyleSheet.create({
-  // Botões do bottom-sheet
-  btnPrimary: {
-    backgroundColor: "#16a34a",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  helper: { color: "#6b7280", fontSize: 12, marginTop: 6 },
-  btnPrimaryText: { color: "#fff", fontWeight: "800" },
-  btnSecondary: {
-    backgroundColor: "#e5e7eb",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  btnSecondaryText: { color: "#111827", fontWeight: "800" },
+const styles =
+  StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor:
+        COLORS.background,
+    },
 
-  safe: { flex: 1, backgroundColor: "#f9fafb" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#f9fafb" },
+    listContent: {
+      paddingBottom: 30,
+    },
 
-  alert: { margin: 12, padding: 10, backgroundColor: "#fee2e2", borderColor: "#fecaca", borderWidth: 1, borderRadius: 10 },
-  alertText: { color: "#b91c1c", textAlign: "center", fontWeight: "700" },
+    /* TOP */
 
-  // Header compacto
-  searchCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderWidth: 1, borderColor: "#e5e7eb",
-    borderRadius: 14,
-    paddingHorizontal: 12, paddingVertical: 10,
-    gap: 10,
-    marginHorizontal: 12,
-  },
-  searchInput: { flex: 1, color: "#111827" },
-  searchIconBtn: {
-    width: 34, height: 34, borderRadius: 17,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: "#F3F4F6"
-  },
+    topBar: {
+      minHeight: 70,
 
-  clearFiltersBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#e5e7eb",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    alignSelf: "flex-start",
-  },
-  clearFiltersText: { color: "#111827", fontWeight: "700", fontSize: 12 },
+      paddingHorizontal: 18,
+      paddingVertical: 12,
 
-  wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+      flexDirection: "row",
 
-  tag: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: "#f3f4f6", borderWidth: 1, borderColor: "#e5e7eb" },
-  tagSelected: { backgroundColor: "#111827", borderColor: "#111827" },
-  tagText: { color: "#111827", fontSize: 12, fontWeight: "700" },
-  tagTextSelected: { color: "#fff" },
+      alignItems: "center",
 
-  picker: { backgroundColor: "#fff", borderRadius: 10, borderColor: "#e5e7eb", borderWidth: 1 },
+      justifyContent:
+        "space-between",
 
-  // Dropdown multi
-  dropdownHeader: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    borderColor: "#e5e7eb",
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  dropdownBody: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    borderColor: "#e5e7eb",
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  dropdownItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderBottomColor: "#f3f4f6",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  checkbox: {
-    width: 18, height: 18, borderRadius: 4,
-    borderColor: "#9ca3af", borderWidth: 1,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: "#fff",
-  },
-  checkboxOn: { backgroundColor: "#111827", borderColor: "#111827" },
+      backgroundColor:
+        COLORS.surface,
 
-  // Card de frete
-  card: {
-    marginHorizontal: 12,
-    backgroundColor: "#fff",
-    borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: "#e5e7eb",
-    marginVertical: 6,
-    flexDirection: "row", gap: 12, alignItems: "center",
-  },
-  badge: { backgroundColor: "#f3f4f6", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
-  badgeText: { fontSize: 12, color: "#374151" },
-  dateText: { marginTop: 4, fontSize: 12, color: "#6b7280" },
+      borderBottomWidth: 1,
 
-  side: { marginLeft: "auto", alignItems: "flex-end", gap: 8 },
-  logo: { width: 48, height: 48, borderRadius: 6, borderColor: "#e5e7eb", borderWidth: 1 },
-  price: { fontSize: 18, color: "#16a34a", fontWeight: "800" },
-  perNote: { fontSize: 12, color: "#6b7280", marginTop: 2 },
-  btn: { marginTop: 6, backgroundColor: "#ea7713ff", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  btnText: { color: "#fff", fontWeight: "700", fontSize: 12 },
+      borderBottomColor:
+        COLORS.borderLight,
+    },
 
-  // Bottom-sheet
-  sheetBackdrop: {
-    position: "absolute",
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    justifyContent: "flex-end"
-  },
-  sheetBody: {
-    maxHeight: "85%",
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    gap: 10,
-    elevation: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: -2 },
-  },
-  sheetHandle: { alignSelf: "center", width: 48, height: 4, borderRadius: 999, backgroundColor: "#e5e7eb", marginBottom: 6 },
+    brand: {
+      color: COLORS.black,
 
-  groupTitle: { fontWeight: "900", color: "#111827", fontSize: 16 },
-  sectionTitle: { fontWeight: "800", color: "#111827", marginTop: 2, marginBottom: 4 },
+      fontSize: 20,
 
-  // Linhas cidade
-  cityRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
-  cityDot: { marginTop: 4 },
-  cityStrong: { fontSize: 16, fontWeight: "700", color: "#1f2937" },
-  cityMuted:  { fontSize: 16, color: "#374151" },
-});
+      fontWeight: "900",
+    },
+
+    topSubtitle: {
+      marginTop: 2,
+
+      color:
+        COLORS.secondaryText,
+
+      fontSize: 12,
+    },
+
+    notificationButton: {
+      width: 42,
+      height: 42,
+
+      borderRadius: 21,
+
+      alignItems: "center",
+      justifyContent:
+        "center",
+
+      backgroundColor:
+        COLORS.primary,
+
+      borderWidth: 1,
+
+      borderColor:
+        COLORS.primaryBorder,
+    },
+
+    /* LOADING */
+
+    loadingContainer: {
+      flex: 1,
+
+      alignItems: "center",
+
+      justifyContent:
+        "center",
+
+      gap: 12,
+    },
+
+    loadingText: {
+      color:
+        COLORS.secondaryText,
+
+      fontSize: 13,
+    },
+
+    /* HERO */
+
+    hero: {
+      marginHorizontal: 16,
+
+      marginTop: 18,
+
+      padding: 15,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      gap: 12,
+
+      backgroundColor:
+        COLORS.surface,
+
+      borderRadius: 16,
+
+      borderWidth: 1,
+
+      borderColor:
+        COLORS.border,
+    },
+
+    heroIcon: {
+      width: 48,
+      height: 48,
+
+      borderRadius: 14,
+
+      alignItems: "center",
+
+      justifyContent:
+        "center",
+
+      backgroundColor:
+        COLORS.primary,
+    },
+
+    heroTextArea: {
+      flex: 1,
+    },
+
+    heroTitle: {
+      color: COLORS.black,
+
+      fontSize: 17,
+
+      fontWeight: "900",
+    },
+
+    heroSubtitle: {
+      marginTop: 3,
+
+      color:
+        COLORS.secondaryText,
+
+      fontSize: 12,
+
+      lineHeight: 17,
+    },
+
+    /* FILTER BAR */
+
+    filterBar: {
+      marginHorizontal: 16,
+
+      marginTop: 20,
+
+      marginBottom: 2,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      justifyContent:
+        "space-between",
+
+      gap: 12,
+    },
+
+    resultsTitle: {
+      color: COLORS.black,
+
+      fontSize: 17,
+
+      fontWeight: "900",
+    },
+
+    resultsCount: {
+      marginTop: 2,
+
+      color:
+        COLORS.secondaryText,
+
+      fontSize: 12,
+    },
+
+    filterButton: {
+      minHeight: 42,
+
+      paddingHorizontal: 12,
+
+      borderRadius: 10,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      justifyContent:
+        "center",
+
+      gap: 6,
+
+      backgroundColor:
+        COLORS.surface,
+
+      borderWidth: 1,
+
+      borderColor:
+        COLORS.border,
+    },
+
+    filterButtonActive: {
+      backgroundColor:
+        COLORS.primarySoft,
+
+      borderColor:
+        COLORS.primaryBorder,
+    },
+
+    filterButtonText: {
+      color: COLORS.black,
+
+      fontSize: 12,
+
+      fontWeight: "800",
+    },
+
+    filterBadge: {
+      minWidth: 20,
+      height: 20,
+
+      paddingHorizontal: 5,
+
+      borderRadius: 10,
+
+      alignItems: "center",
+
+      justifyContent:
+        "center",
+
+      backgroundColor:
+        COLORS.primary,
+    },
+
+    filterBadgeText: {
+      color: COLORS.black,
+
+      fontSize: 10,
+
+      fontWeight: "900",
+    },
+
+    /* SEARCH */
+
+    searchBox: {
+      marginHorizontal: 16,
+
+      marginTop: 12,
+
+      padding: 16,
+
+      borderRadius: 16,
+
+      backgroundColor:
+        COLORS.surface,
+
+      borderWidth: 1,
+
+      borderColor:
+        COLORS.border,
+    },
+
+    filterHeader: {
+      marginBottom: 16,
+
+      flexDirection: "row",
+
+      alignItems:
+        "flex-start",
+
+      justifyContent:
+        "space-between",
+
+      gap: 12,
+    },
+
+    filterTitle: {
+      color: COLORS.black,
+
+      fontSize: 16,
+
+      fontWeight: "900",
+    },
+
+    filterSubtitle: {
+      marginTop: 2,
+
+      color:
+        COLORS.secondaryText,
+
+      fontSize: 11,
+    },
+
+    inputLabel: {
+      marginBottom: 6,
+
+      color: "#334155",
+
+      fontSize: 12,
+
+      fontWeight: "800",
+    },
+
+    fieldSpacing: {
+      marginTop: 14,
+    },
+
+    inputWrapper: {
+      minHeight: 50,
+
+      paddingHorizontal: 13,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      gap: 9,
+
+      borderWidth: 1,
+
+      borderColor:
+        "#CBD5E1",
+
+      borderRadius: 11,
+
+      backgroundColor:
+        COLORS.surface,
+    },
+
+    input: {
+      flex: 1,
+
+      color: COLORS.text,
+
+      fontSize: 14,
+
+      paddingVertical: 10,
+    },
+
+    /* AJUDANTE */
+
+    optionRow: {
+      flexDirection: "row",
+
+      gap: 7,
+    },
+
+    optionButton: {
+      flex: 1,
+
+      minHeight: 40,
+
+      paddingHorizontal: 6,
+
+      borderRadius: 9,
+
+      alignItems: "center",
+
+      justifyContent:
+        "center",
+
+      backgroundColor:
+        COLORS.background,
+
+      borderWidth: 1,
+
+      borderColor:
+        COLORS.border,
+    },
+
+    optionButtonActive: {
+      backgroundColor:
+        COLORS.primary,
+
+      borderColor:
+        COLORS.primary,
+    },
+
+    optionText: {
+      color:
+        COLORS.secondaryText,
+
+      fontSize: 11,
+
+      fontWeight: "700",
+
+      textAlign: "center",
+    },
+
+    optionTextActive: {
+      color: COLORS.black,
+
+      fontWeight: "900",
+    },
+
+    /* BOTÕES */
+
+    searchButton: {
+      minHeight: 50,
+
+      marginTop: 18,
+
+      borderRadius: 11,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      justifyContent:
+        "center",
+
+      gap: 8,
+
+      backgroundColor:
+        COLORS.primary,
+    },
+
+    searchButtonText: {
+      color: COLORS.black,
+
+      fontSize: 14,
+
+      fontWeight: "900",
+    },
+
+    clearButton: {
+      minHeight: 42,
+
+      marginTop: 8,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      justifyContent:
+        "center",
+
+      gap: 6,
+    },
+
+    clearButtonText: {
+      color:
+        COLORS.secondaryText,
+
+      fontSize: 12,
+
+      fontWeight: "700",
+    },
+
+    /* FILTROS ATIVOS */
+
+    activeFilters: {
+      marginHorizontal: 16,
+
+      marginTop: 12,
+
+      padding: 12,
+
+      borderRadius: 12,
+
+      backgroundColor:
+        COLORS.primarySoft,
+
+      borderWidth: 1,
+
+      borderColor:
+        COLORS.primaryBorder,
+    },
+
+    activeFilterHeader: {
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      justifyContent:
+        "space-between",
+    },
+
+    activeFilterTitle: {
+      color: COLORS.black,
+
+      fontSize: 11,
+
+      fontWeight: "900",
+    },
+
+    clearText: {
+      color: "#854D0E",
+
+      fontSize: 11,
+
+      fontWeight: "800",
+    },
+
+    activeFilterChips: {
+      marginTop: 8,
+
+      flexDirection: "row",
+
+      flexWrap: "wrap",
+
+      gap: 6,
+    },
+
+    activeChip: {
+      paddingHorizontal: 8,
+
+      paddingVertical: 5,
+
+      borderRadius: 7,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      gap: 4,
+
+      backgroundColor:
+        COLORS.surface,
+    },
+
+    activeChipText: {
+      color: COLORS.black,
+
+      fontSize: 10,
+
+      fontWeight: "700",
+    },
+
+    /* ERROR */
+
+    errorBox: {
+      marginHorizontal: 16,
+
+      marginTop: 14,
+
+      padding: 13,
+
+      borderRadius: 12,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      gap: 9,
+
+      backgroundColor:
+        COLORS.dangerBackground,
+
+      borderWidth: 1,
+
+      borderColor:
+        COLORS.dangerBorder,
+    },
+
+    errorText: {
+      flex: 1,
+
+      color: COLORS.danger,
+
+      fontSize: 12,
+
+      lineHeight: 17,
+
+      fontWeight: "600",
+    },
+
+    /* CARD */
+
+    card: {
+      marginHorizontal: 16,
+
+      marginTop: 10,
+
+      padding: 16,
+
+      borderRadius: 16,
+
+      backgroundColor:
+        COLORS.surface,
+
+      borderWidth: 1,
+
+      borderColor:
+        COLORS.border,
+    },
+
+    routeArea: {
+      flexDirection: "row",
+    },
+
+    routeTimeline: {
+      width: 20,
+
+      alignItems: "center",
+
+      paddingTop: 5,
+    },
+
+    originDot: {
+      width: 10,
+      height: 10,
+
+      borderRadius: 5,
+
+      backgroundColor:
+        COLORS.primary,
+
+      borderWidth: 2,
+
+      borderColor:
+        COLORS.black,
+    },
+
+    routeLine: {
+      width: 2,
+
+      height: 31,
+
+      marginVertical: 3,
+
+      backgroundColor:
+        "#CBD5E1",
+    },
+
+    destinationDot: {
+      width: 10,
+      height: 10,
+
+      borderRadius: 2,
+
+      backgroundColor:
+        COLORS.black,
+    },
+
+    routeTextArea: {
+      flex: 1,
+
+      marginLeft: 7,
+    },
+
+    destinationArea: {
+      marginTop: 17,
+    },
+
+    routeLabel: {
+      color:
+        COLORS.mutedText,
+
+      fontSize: 9,
+
+      fontWeight: "900",
+
+      letterSpacing: 0.8,
+    },
+
+    city: {
+      marginTop: 1,
+
+      color: COLORS.black,
+
+      fontSize: 15,
+
+      fontWeight: "800",
+    },
+
+    description: {
+      marginTop: 15,
+
+      color: "#475569",
+
+      fontSize: 13,
+
+      lineHeight: 19,
+    },
+
+    infoRow: {
+      marginTop: 14,
+
+      flexDirection: "row",
+
+      flexWrap: "wrap",
+
+      gap: 7,
+    },
+
+    infoChip: {
+      paddingHorizontal: 9,
+
+      paddingVertical: 6,
+
+      borderRadius: 8,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      gap: 5,
+
+      backgroundColor:
+        COLORS.background,
+
+      borderWidth: 1,
+
+      borderColor:
+        COLORS.border,
+    },
+
+    infoChipText: {
+      color: "#475569",
+
+      fontSize: 11,
+
+      fontWeight: "700",
+    },
+
+    deliveryRow: {
+      marginTop: 10,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      gap: 5,
+    },
+
+    deliveryText: {
+      color:
+        COLORS.secondaryText,
+
+      fontSize: 11,
+    },
+
+    /* FOOTER */
+
+    cardFooter: {
+      marginTop: 16,
+
+      paddingTop: 13,
+
+      borderTopWidth: 1,
+
+      borderTopColor:
+        COLORS.borderLight,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      justifyContent:
+        "space-between",
+
+      gap: 10,
+    },
+
+    footerLeft: {
+      flex: 1,
+
+      gap: 5,
+    },
+
+    createdAt: {
+      color:
+        COLORS.mutedText,
+
+      fontSize: 10,
+    },
+
+    proposalInfo: {
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      gap: 4,
+    },
+
+    proposalText: {
+      color:
+        COLORS.secondaryText,
+
+      fontSize: 11,
+
+      fontWeight: "600",
+    },
+
+    viewButton: {
+      minHeight: 38,
+
+      paddingHorizontal: 13,
+
+      borderRadius: 9,
+
+      flexDirection: "row",
+
+      alignItems: "center",
+
+      justifyContent:
+        "center",
+
+      gap: 4,
+
+      backgroundColor:
+        COLORS.black,
+    },
+
+    viewButtonText: {
+      color: "#FFFFFF",
+
+      fontSize: 11,
+
+      fontWeight: "800",
+    },
+
+    /* EMPTY */
+
+    empty: {
+      marginHorizontal: 16,
+
+      marginTop: 28,
+
+      padding: 28,
+
+      alignItems: "center",
+    },
+
+    emptyIcon: {
+      width: 62,
+      height: 62,
+
+      borderRadius: 31,
+
+      alignItems: "center",
+
+      justifyContent:
+        "center",
+
+      backgroundColor:
+        "#F1F5F9",
+    },
+
+    emptyTitle: {
+      marginTop: 13,
+
+      color: COLORS.black,
+
+      fontSize: 16,
+
+      fontWeight: "900",
+    },
+
+    emptyText: {
+      marginTop: 5,
+
+      maxWidth: 290,
+
+      textAlign: "center",
+
+      color:
+        COLORS.secondaryText,
+
+      fontSize: 12,
+
+      lineHeight: 18,
+    },
+
+    emptyClearButton: {
+      marginTop: 15,
+
+      minHeight: 42,
+
+      paddingHorizontal: 18,
+
+      borderRadius: 10,
+
+      alignItems: "center",
+
+      justifyContent:
+        "center",
+
+      backgroundColor:
+        COLORS.primary,
+    },
+
+    emptyClearText: {
+      color: COLORS.black,
+
+      fontSize: 12,
+
+      fontWeight: "900",
+    },
+  });
