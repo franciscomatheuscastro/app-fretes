@@ -2,15 +2,12 @@
   "expo": {
     "name": "Meu Freteiro",
     "slug": "motorista-fretes",
-
-    "version": "1.1.0",
+    "version": "1.1.1",
     "icon": "./assets/images/icon.png",
-
     "scheme": "voucarregar",
-
     "android": {
       "package": "br.voucarregar.motoristafretes",
-      "versionCode": 10,
+      "versionCode": 11,
       "icon": "./assets/images/icon.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
@@ -52,16 +49,10 @@
         }
       ]
     },
-
-    "notification": {
-      "icon": "./assets/images/icon.png",
-      "color": "#FACC15"
-    },
-
     "ios": {
       "bundleIdentifier": "br.voucarregar.motoristafretes",
       "supportsTablet": true,
-      "buildNumber": "10",
+      "buildNumber": "11",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Usamos o Face ID para você entrar rapidamente no app.",
         "ITSAppUsesNonExemptEncryption": false,
@@ -75,15 +66,12 @@
         "applinks:app.voucarregar.com.br"
       ]
     },
-
     "updates": {
       "url": "https://u.expo.dev/fe5fc4e2-2c05-4624-957b-611c19613195"
     },
-
     "runtimeVersion": {
       "policy": "appVersion"
     },
-
     "plugins": [
       "./plugins/with-android-queries.js",
       "expo-router",
@@ -97,11 +85,19 @@
         }
       ],
       "expo-secure-store",
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#FACC15"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      "expo-image",
+      "expo-status-bar"
     ],
-
     "owner": "fcomatcas",
-
     "extra": {
       "eas": {
         "projectId": "fe5fc4e2-2c05-4624-957b-611c19613195"

@@ -1,49 +1,138 @@
-// /backend/notifications-bg.ts
-import * as Notifications from "expo-notifications";
+// backend/notifications-bg.ts
+
+import Constants from "expo-constants";
 import * as TaskManager from "expo-task-manager";
 import { Platform } from "react-native";
 
-// Nome único da task
-export const BACKGROUND_NOTIFICATIONS_TASK = "background-notifications-task";
+export const BACKGROUND_NOTIFICATIONS_TASK =
+  "background-notifications-task";
 
-// Executor: precisa ser async para satisfazer a tipagem (Promise<void>)
-TaskManager.defineTask(BACKGROUND_NOTIFICATIONS_TASK, async ({ data, error }) => {
-  if (error) {
-    console.warn("BG notification error:", error);
-    return;
-  }
+/* =========================================================
+   AMBIENTE
+========================================================= */
 
-  // Dependendo do gatilho, pode vir notification OU response
-  const payload: any = data;
-  const notif = payload?.notification ?? payload?.response?.notification ?? null;
+function isExpoGo() {
+  return (
+    Constants.expoGoConfig != null
+  );
+}
 
-  if (notif?.request?.content) {
-    const { title, body, data: extra } = notif.request.content;
-    // Se quiser, persista no seu Storage aqui (tomar cuidado com chaves válidas):
-    // await Storage.setItem("ultimaNotif", JSON.stringify({ title, body, extra, ts: Date.now() }));
-    console.log("BG notification:", { title, body, extra });
-  }
-});
+/* =========================================================
+   TASK
+========================================================= */
 
-// Registrar a task (Android). Em iOS o suporte a background é limitado.
-async function registerBackgroundTask() {
-  try {
-    if (Platform.OS !== "android") return;
+/*
+ * A definição da task pode existir normalmente.
+ *
+ * O expo-notifications só será carregado
+ * fora do Expo Go.
+ */
+TaskManager.defineTask(
+  BACKGROUND_NOTIFICATIONS_TASK,
+  async ({
+    data,
+    error,
+  }) => {
+    if (error) {
+      console.warn(
+        "BG notification error:",
+        error
+      );
 
-    // Apenas registra se ainda não estiver registrada
-    const already = await TaskManager.isTaskRegisteredAsync(BACKGROUND_NOTIFICATIONS_TASK);
-    if (!already) {
-      await Notifications.registerTaskAsync(BACKGROUND_NOTIFICATIONS_TASK);
+      return;
     }
 
-    // Não existe isRegisteredForRemoteNotificationsAsync — para permissão, use:
-    // const { status } = await Notifications.getPermissionsAsync();
-    // if (status !== "granted") await Notifications.requestPermissionsAsync();
+    const payload: any =
+      data;
 
-  } catch (e) {
-    console.warn("Falha ao registrar BG notifications task:", e);
+    const notif =
+      payload?.notification ??
+      payload?.response
+        ?.notification ??
+      null;
+
+    if (
+      notif?.request?.content
+    ) {
+      const {
+        title,
+        body,
+        data: extra,
+      } =
+        notif.request.content;
+
+      console.log(
+        "BG notification:",
+        {
+          title,
+          body,
+          extra,
+        }
+      );
+    }
+  }
+);
+
+/* =========================================================
+   REGISTRO
+========================================================= */
+
+async function registerBackgroundTask() {
+  try {
+    /*
+     * Push remoto não é registrado
+     * quando estamos no Expo Go.
+     */
+    if (isExpoGo()) {
+      if (__DEV__) {
+        console.log(
+          "[PUSH BG] Ignorado no Expo Go."
+        );
+      }
+
+      return;
+    }
+
+    if (
+      Platform.OS !==
+      "android"
+    ) {
+      return;
+    }
+
+    /*
+     * Carrega expo-notifications somente
+     * em Development/Production Build.
+     */
+    const Notifications =
+      require(
+        "expo-notifications"
+      ) as typeof import(
+        "expo-notifications"
+      );
+
+    const already =
+      await TaskManager
+        .isTaskRegisteredAsync(
+          BACKGROUND_NOTIFICATIONS_TASK
+        );
+
+    if (!already) {
+      await Notifications
+        .registerTaskAsync(
+          BACKGROUND_NOTIFICATIONS_TASK
+        );
+    }
+  } catch (error) {
+    console.warn(
+      "Falha ao registrar BG notifications task:",
+      error
+    );
   }
 }
 
-// Executa no load do módulo
+/* =========================================================
+   INICIALIZAÇÃO
+========================================================= */
+
 registerBackgroundTask();

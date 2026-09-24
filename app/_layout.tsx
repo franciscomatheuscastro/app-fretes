@@ -1,34 +1,32 @@
 // app/_layout.tsx
 
+import Constants from "expo-constants";
+import { useFonts } from "expo-font";
 import {
   DarkTheme,
   DefaultTheme,
+  Stack,
   ThemeProvider,
-} from "@react-navigation/native";
-import Constants from "expo-constants";
-import { useFonts } from "expo-font";
-import * as Notifications from "expo-notifications";
-import { Stack } from "expo-router";
+} from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
 import { Platform } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { useColorScheme } from "@/hooks/useColorScheme";
 
 /* =========================================================
-   NOTIFICAÇÕES EM FOREGROUND
+   AMBIENTE
 ========================================================= */
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+function isExpoGo() {
+  return (
+    Constants.expoGoConfig != null
+  );
+}
 
 /* =========================================================
    ROOT LAYOUT
@@ -45,15 +43,6 @@ export default function RootLayout() {
       ),
     });
 
-  /*
-   * Mantemos o token em memória por enquanto.
-   *
-   * O login já possui o fluxo responsável
-   * por registrar o push token no backend.
-   *
-   * Portanto NÃO vamos fazer outro POST
-   * diretamente daqui.
-   */
   const [
     _expoPushToken,
     setExpoPushToken,
@@ -70,49 +59,103 @@ export default function RootLayout() {
     let ativo = true;
 
     async function prepararNotificacoes() {
+      /*
+       * Expo Go:
+       *
+       * Não inicializamos push remoto.
+       * O restante do aplicativo continua funcionando.
+       */
+      if (isExpoGo()) {
+        if (__DEV__) {
+          console.log(
+            "[PUSH] Inicialização ignorada no Expo Go."
+          );
+        }
+
+        return;
+      }
+
       try {
         /*
-         * Android:
-         * cria o canal antes de trabalhar
-         * com as notificações.
+         * Carrega expo-notifications somente
+         * em Development/Production Build.
          */
+        const Notifications =
+          require(
+            "expo-notifications"
+          ) as typeof import(
+            "expo-notifications"
+          );
+
+        /* -----------------------------------------------
+           HANDLER GLOBAL
+        ------------------------------------------------ */
+
+        Notifications.setNotificationHandler(
+          {
+            handleNotification:
+              async () => ({
+                shouldShowAlert:
+                  true,
+
+                shouldShowBanner:
+                  true,
+
+                shouldShowList:
+                  true,
+
+                shouldPlaySound:
+                  true,
+
+                shouldSetBadge:
+                  false,
+              }),
+          }
+        );
+
+        /* -----------------------------------------------
+           ANDROID
+        ------------------------------------------------ */
+
         if (
           Platform.OS ===
           "android"
         ) {
-          await Notifications.setNotificationChannelAsync(
-            "default",
-            {
-              name:
-                "Notificações",
+          await Notifications
+            .setNotificationChannelAsync(
+              "default",
+              {
+                name:
+                  "Notificações",
 
-              importance:
-                Notifications
-                  .AndroidImportance
-                  .MAX,
+                importance:
+                  Notifications
+                    .AndroidImportance
+                    .MAX,
 
-              sound:
-                "default",
+                sound:
+                  "default",
 
-              vibrationPattern: [
-                0,
-                250,
-                250,
-                250,
-              ],
+                vibrationPattern:
+                  [
+                    0,
+                    250,
+                    250,
+                    250,
+                  ],
 
-              enableVibrate:
-                true,
+                enableVibrate:
+                  true,
 
-              showBadge:
-                true,
+                showBadge:
+                  true,
 
-              lockscreenVisibility:
-                Notifications
-                  .AndroidNotificationVisibility
-                  .PUBLIC,
-            }
-          );
+                lockscreenVisibility:
+                  Notifications
+                    .AndroidNotificationVisibility
+                    .PUBLIC,
+              }
+            );
         }
 
         /* -----------------------------------------------
@@ -120,7 +163,8 @@ export default function RootLayout() {
         ------------------------------------------------ */
 
         const current =
-          await Notifications.getPermissionsAsync();
+          await Notifications
+            .getPermissionsAsync();
 
         let status =
           current.status;
@@ -130,32 +174,29 @@ export default function RootLayout() {
           "granted"
         ) {
           const request =
-            await Notifications.requestPermissionsAsync(
-              Platform.OS ===
-                "ios"
-                ? {
-                    ios: {
-                      allowAlert:
-                        true,
+            await Notifications
+              .requestPermissionsAsync(
+                Platform.OS ===
+                  "ios"
+                  ? {
+                      ios: {
+                        allowAlert:
+                          true,
 
-                      allowBadge:
-                        true,
+                        allowBadge:
+                          true,
 
-                      allowSound:
-                        true,
-                    },
-                  }
-                : {}
-            );
+                        allowSound:
+                          true,
+                      },
+                    }
+                  : {}
+              );
 
           status =
             request.status;
         }
 
-        /*
-         * Usuário não autorizou.
-         * O aplicativo continua normalmente.
-         */
         if (
           status !==
           "granted"
@@ -164,7 +205,7 @@ export default function RootLayout() {
         }
 
         /* -----------------------------------------------
-           EAS PROJECT ID
+           PROJECT ID
         ------------------------------------------------ */
 
         const projectId =
@@ -178,17 +219,18 @@ export default function RootLayout() {
             ?.projectId;
 
         /* -----------------------------------------------
-           EXPO PUSH TOKEN
+           PUSH TOKEN
         ------------------------------------------------ */
 
         const tokenResponse =
-          await Notifications.getExpoPushTokenAsync(
-            projectId
-              ? {
-                  projectId,
-                }
-              : undefined
-          );
+          await Notifications
+            .getExpoPushTokenAsync(
+              projectId
+                ? {
+                    projectId,
+                  }
+                : undefined
+            );
 
         if (!ativo) {
           return;
@@ -199,16 +241,10 @@ export default function RootLayout() {
         );
 
         /*
-         * IMPORTANTE:
+         * Não enviamos para o backend daqui.
          *
-         * Não enviamos o token ao backend daqui.
-         *
-         * O fluxo de login do Meu Freteiro já chama:
-         *
-         * registerPushTokenOnBackend(...)
-         *
-         * Assim evitamos registrar o mesmo token
-         * em dois lugares diferentes.
+         * O fluxo de login continua responsável
+         * por registerPushTokenOnBackend(...).
          */
       } catch (error) {
         console.warn(
@@ -256,19 +292,13 @@ export default function RootLayout() {
               "fade",
           }}
         >
-          {/* LOGIN */}
-
           <Stack.Screen
             name="index"
           />
 
-          {/* ÁREA LOGADA */}
-
           <Stack.Screen
             name="(tabs)"
           />
-
-          {/* 404 */}
 
           <Stack.Screen
             name="+not-found"

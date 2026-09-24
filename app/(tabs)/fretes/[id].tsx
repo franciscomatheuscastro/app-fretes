@@ -3,7 +3,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -450,6 +450,24 @@ export default function FreteDetalheScreen() {
   ] =
     useState(false);
 
+  const [
+    fotosAssinadas,
+    setFotosAssinadas,
+  ] =
+    useState<string[]>([]);
+
+  const [
+    carregandoFotos,
+    setCarregandoFotos,
+  ] =
+    useState(false);
+
+  const [
+    fotoAmpliada,
+    setFotoAmpliada,
+  ] =
+    useState<string | null>(null);
+
   /* =======================================================
      CARREGAR DETALHE
   ======================================================= */
@@ -552,6 +570,155 @@ export default function FreteDetalheScreen() {
           setFrete(
             freteRecebido
           );
+
+          /* -------------------------------
+             FOTOS - URLS ASSINADAS
+          -------------------------------- */
+
+          setFotosAssinadas([]);
+
+          const fotosOriginais =
+            Array.isArray(freteRecebido?.fotos)
+              ? freteRecebido.fotos.filter(
+                  (foto): foto is string =>
+                    typeof foto === "string" &&
+                    foto.trim().length > 0
+                )
+              : [];
+
+          if (fotosOriginais.length > 0) {
+            setCarregandoFotos(true);
+
+            try {
+              const resultados =
+                await Promise.allSettled(
+                  fotosOriginais.map(
+                    async (foto) => {
+                      /*
+                       * Sempre usa o host oficial com www.
+                       * Isso evita redirects que podem remover
+                       * o Authorization no React Native.
+                       *
+                       * mode=json faz a API retornar
+                       * { url: signedUrl } em vez de redirect 302.
+                       */
+                      let caminhoFoto =
+                        foto.trim();
+
+                      try {
+                        if (
+                          /^https?:\/\//i.test(
+                            caminhoFoto
+                          )
+                        ) {
+                          const urlFoto =
+                            new URL(
+                              caminhoFoto
+                            );
+
+                          caminhoFoto =
+                            `${urlFoto.pathname}${urlFoto.search}`;
+                        }
+                      } catch {
+                        // Mantém o valor original.
+                      }
+
+                      if (
+                        !caminhoFoto.startsWith(
+                          "/"
+                        )
+                      ) {
+                        caminhoFoto =
+                          `/${caminhoFoto}`;
+                      }
+
+                      const separador =
+                        caminhoFoto.includes(
+                          "?"
+                        )
+                          ? "&"
+                          : "?";
+
+                      const endpoint =
+                        `${API_BASE}${caminhoFoto}${separador}mode=json`;
+
+                      const responseFoto =
+                        await fetch(
+                          endpoint,
+                          {
+                            method: "GET",
+                            headers: {
+                              Accept:
+                                "application/json",
+                              Authorization:
+                                `Bearer ${token}`,
+                            },
+                          }
+                        );
+
+                      const bodyFoto =
+                        await lerJsonSeguro(
+                          responseFoto
+                        );
+
+                      if (
+                        !responseFoto.ok
+                      ) {
+                        throw new Error(
+                          extrairMensagemErro(
+                            bodyFoto,
+                            `Não foi possível liberar a foto (${responseFoto.status}).`
+                          )
+                        );
+                      }
+
+                      const signedUrl =
+                        typeof bodyFoto?.url ===
+                          "string"
+                          ? bodyFoto.url.trim()
+                          : "";
+
+                      if (!signedUrl) {
+                        throw new Error(
+                          "A API não retornou a URL assinada da foto."
+                        );
+                      }
+
+                      return signedUrl;
+                    }
+                  )
+                );
+
+              const urlsValidas =
+                resultados.flatMap(
+                  (resultado) => {
+                    if (
+                      resultado.status ===
+                      "fulfilled"
+                    ) {
+                      return [
+                        resultado.value,
+                      ];
+                    }
+
+                    console.warn(
+                      "[FOTO FRETE] Falha ao obter URL assinada:",
+                      resultado.reason
+                    );
+
+                    return [];
+                  }
+                );
+
+              setFotosAssinadas(
+                urlsValidas
+              );
+            } finally {
+              setCarregandoFotos(false);
+            }
+          } else {
+            setCarregandoFotos(false);
+          }
 
           /* -------------------------------
              MINHA PROPOSTA
@@ -1421,47 +1588,110 @@ export default function FreteDetalheScreen() {
         {/* FOTOS */}
 
         {!!frete.fotos?.length && (
-          <View
-            style={
-              styles.card
-            }
-          >
-            <Text
-              style={
-                styles.cardTitle
-              }
-            >
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>
               Fotos
             </Text>
 
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={
-                false
-              }
-              contentContainerStyle={
-                styles.photosRow
-              }
-            >
-              {frete.fotos.map(
-                (
-                  foto,
-                  index
-                ) => (
-                  <Image
-                    key={`${foto}-${index}`}
-                    source={{
-                      uri:
-                        foto,
-                    }}
-                    style={
-                      styles.photo
-                    }
-                    resizeMode="cover"
-                  />
-                )
-              )}
-            </ScrollView>
+            {carregandoFotos ? (
+              <View
+                style={
+                  styles.photosLoading
+                }
+              >
+                <ActivityIndicator
+                  size="small"
+                  color="#111827"
+                />
+
+                <Text
+                  style={
+                    styles.photosLoadingText
+                  }
+                >
+                  Carregando fotos...
+                </Text>
+              </View>
+            ) : fotosAssinadas.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={
+                  false
+                }
+                contentContainerStyle={
+                  styles.photosRow
+                }
+              >
+                {fotosAssinadas.map(
+                  (fotoUrl, index) => (
+                    <TouchableOpacity
+                      key={`${index}-${fotoUrl}`}
+                      activeOpacity={0.88}
+                      onPress={() =>
+                        setFotoAmpliada(
+                          fotoUrl
+                        )
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={`Abrir foto ${index + 1} em tela cheia`}
+                    >
+                      <Image
+                        source={{
+                          uri: fotoUrl,
+                        }}
+                        style={
+                          styles.photo
+                        }
+                        resizeMode="cover"
+                        onLoad={() => {
+                          if (__DEV__) {
+                            console.log(
+                              "[FOTO FRETE] Carregada:",
+                              index + 1
+                            );
+                          }
+                        }}
+                        onError={(
+                          event
+                        ) => {
+                          console.warn(
+                            "[FOTO FRETE] Falha ao exibir URL assinada:",
+                            {
+                              indice:
+                                index,
+                              erro:
+                                event
+                                  .nativeEvent
+                                  .error,
+                            }
+                          );
+                        }}
+                      />
+                    </TouchableOpacity>
+                  )
+                )}
+              </ScrollView>
+            ) : (
+              <View
+                style={
+                  styles.photosUnavailable
+                }
+              >
+                <Ionicons
+                  name="image-outline"
+                  size={24}
+                  color="#94a3b8"
+                />
+
+                <Text
+                  style={
+                    styles.photosUnavailableText
+                  }
+                >
+                  Não foi possível carregar as fotos deste frete.
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -1815,6 +2045,77 @@ export default function FreteDetalheScreen() {
           </Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* ===================================================
+          VISUALIZADOR DE FOTO
+      ==================================================== */}
+
+      <Modal
+        visible={
+          Boolean(
+            fotoAmpliada
+          )
+        }
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() =>
+          setFotoAmpliada(
+            null
+          )
+        }
+      >
+        <View
+          style={
+            styles.photoViewerOverlay
+          }
+        >
+          <TouchableOpacity
+            style={
+              styles.photoViewerClose
+            }
+            activeOpacity={0.85}
+            onPress={() =>
+              setFotoAmpliada(
+                null
+              )
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Fechar foto"
+          >
+            <Ionicons
+              name="close"
+              size={30}
+              color="#ffffff"
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={
+              styles.photoViewerBackdrop
+            }
+            activeOpacity={1}
+            onPress={() =>
+              setFotoAmpliada(
+                null
+              )
+            }
+          >
+            {fotoAmpliada ? (
+              <Image
+                source={{
+                  uri:
+                    fotoAmpliada,
+                }}
+                style={
+                  styles.photoViewerImage
+                }
+                resizeMode="contain"
+              />
+            ) : null}
+          </TouchableOpacity>
+        </View>
+      </Modal>
 
       {/* ===================================================
           MODAL DE PROPOSTA
@@ -2386,6 +2687,70 @@ const styles =
 
     photosRow: {
       gap: 9,
+    },
+
+    photosLoading: {
+      minHeight: 125,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+    },
+
+    photosLoadingText: {
+      color: "#64748b",
+      fontSize: 11,
+    },
+
+    photosUnavailable: {
+      minHeight: 125,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      borderRadius: 12,
+      backgroundColor: "#f8fafc",
+    },
+
+    photosUnavailableText: {
+      color: "#64748b",
+      fontSize: 11,
+      textAlign: "center",
+    },
+
+    photoViewerOverlay: {
+      flex: 1,
+      backgroundColor:
+        "rgba(0,0,0,0.96)",
+    },
+
+    photoViewerBackdrop: {
+      flex: 1,
+      alignItems:
+        "center",
+      justifyContent:
+        "center",
+      paddingHorizontal: 12,
+      paddingVertical: 60,
+    },
+
+    photoViewerImage: {
+      width: "100%",
+      height: "100%",
+    },
+
+    photoViewerClose: {
+      position: "absolute",
+      top: 48,
+      right: 18,
+      zIndex: 20,
+      width: 46,
+      height: 46,
+      borderRadius: 23,
+      alignItems:
+        "center",
+      justifyContent:
+        "center",
+      backgroundColor:
+        "rgba(255,255,255,0.16)",
     },
 
     photo: {
